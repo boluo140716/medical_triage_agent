@@ -16,7 +16,7 @@ SAVE_SUMMARY_PATH = "summary.txt"
 
 # ===================== LLM & Embedding 模型配置 =====================
 LLM_MODEL_NAME = "qwen2:7b"
-LLM_TEMPERATURE = 0.8
+LLM_TEMPERATURE = 0.3
 LLM_GPU_NUM = 0
 EMBED_MODEL_NAME = "all-minilm"
 
@@ -31,6 +31,14 @@ TOP_K_FIRST_FAISS = 3
 TOP_K_SUB_RETRIEVE = 3
 ENSEMBLE_WEIGHT_VECTOR = 0.6
 ENSEMBLE_WEIGHT_BM25 = 0.4
+
+# ===================== 上传文件参数 =====================
+UPLOAD_MAX_FILE_SIZE_MB = 10        # 单文件上限 10MB
+UPLOAD_MAX_FILE_COUNT = 5           # 单次最多 5 个文件
+UPLOAD_TOP_K_TEMP = 3               # 临时文档 Chroma 检索返回数
+
+# ===================== 智能体循环控制 =====================
+MAX_TOOL_ROUNDS = 2                  # ReAct 最大工具调用轮数，超出强制 LLM 文本回答
 
 # ===================== 第三方服务密钥 =====================
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")

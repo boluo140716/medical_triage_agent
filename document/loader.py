@@ -1,8 +1,8 @@
 """
-文档加载模块：支持 txt / pdf / docx 多格式文档读取
+文档加载模块：支持 txt / pdf / docx / markdown / excel 多格式文档读取
 """
 import os
-from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
+from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader,UnstructuredMarkdownLoader,UnstructuredExcelLoader
 from log_config import logger
 
 def load_documents(file_paths: list[str]):
@@ -27,6 +27,11 @@ def load_documents(file_paths: list[str]):
                 loader = PyPDFLoader(path)
             elif ext == ".docx":
                 loader = Docx2txtLoader(path)
+            elif ext == ".md":
+                loader = UnstructuredMarkdownLoader(path)
+            # 新增 Excel 支持 xlsx / xls
+            elif ext in (".xlsx", ".xls"):
+                loader = UnstructuredExcelLoader(path, mode="elements")
             else:
                 logger.warning(f"不支持文件格式 {ext}，跳过 {path}")
                 continue

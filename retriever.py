@@ -1,32 +1,46 @@
 """
-检索聚合层：双层分级RAG + 向量/关键词混合检索
-上层Agent只调用此模块，不感知底层细节
+检索聚合层：双层分级RAG + 向量/关键词混合检索 + LRU 内存缓存
+上层 Agent 只调用此模块，不感知底层细节
 """
+from functools import lru_cache
 from langchain_chroma import Chroma
 from langchain_classic.retrievers import EnsembleRetriever
 from langchain_community.retrievers import BM25Retriever
 from settings import TOP_K_SUB_RETRIEVE, ENSEMBLE_WEIGHT_VECTOR, ENSEMBLE_WEIGHT_BM25
 from document.vector_store import faiss_search, index2full, embeddings
 from document.splitter import detail_splitter
-from utils import format_retrieve_docs
+from log_config import logger
 import time
 
+
+@lru_cache(maxsize=128)
 def multi_hybrid_retrieve(query: str):
     """
-    双层RAG主逻辑：
-    1. FAISS摘要粗筛完整文档
-    2. 文档精细分片
-    3. Chroma向量 + BM25关键词 混合检索
+    带 LRU 缓存的双层混合检索。
+    相同查询直接返回缓存结果，跳过 FAISS / Chroma 向量计算。
+
+    检索流程：
+    1. FAISS 摘要粗筛 → 锁定相关文档
+    2. 文档精细分片（500 字符）
+    3. Chroma 向量 + BM25 关键词 Ensemble 混合检索
     """
+    logger.info(f"检索(缓存未命中): {query[:80]}...")
+
     valid_index = faiss_search(query)
-    time.sleep(0.15)
+    time.sleep(0.05)  # 轻量限速，避免压垮本地 Ollama embedding
     if not valid_index:
         return []
 
     # 对命中文档做精细分片
     all_chunks = []
     for idx in valid_index:
-        full_text = index2full[idx]
+        if idx in index2full:
+            full_text = index2full[idx]
+        else:
+            full_text = ""
+        # 空文本直接跳过分片
+        if not full_text.strip():
+            continue
         chunks = detail_splitter.split_text(full_text)
         all_chunks.extend(chunks)
 
