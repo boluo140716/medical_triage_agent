@@ -3,7 +3,7 @@
 """
 import os
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader,UnstructuredMarkdownLoader,UnstructuredExcelLoader
-from log_config import logger
+from core.log_config import logger
 
 
 def _load_txt_with_fallback(path: str):

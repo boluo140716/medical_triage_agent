@@ -8,11 +8,11 @@ from langchain_core.documents import Document
 from langchain_chroma import Chroma
 from langchain_classic.retrievers import EnsembleRetriever
 from langchain_community.retrievers import BM25Retriever
-from settings import TOP_K_SUB_RETRIEVE, ENSEMBLE_WEIGHT_VECTOR, ENSEMBLE_WEIGHT_BM25, TOP_K_RERANK
+from core.settings import TOP_K_SUB_RETRIEVE, ENSEMBLE_WEIGHT_VECTOR, ENSEMBLE_WEIGHT_BM25, TOP_K_RERANK
 from document.vector_store import faiss_search, index2full, embeddings
 from document.splitter import detail_splitter
 from document.reranker import rerank_documents
-from log_config import logger
+from core.log_config import logger
 
 
 @lru_cache(maxsize=128)

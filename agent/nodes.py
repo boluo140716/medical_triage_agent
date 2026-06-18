@@ -5,10 +5,10 @@ LangGraph 业务节点：ReAct 思考节点 + 工具执行节点
 import contextvars
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from langchain_openai import ChatOpenAI
-from prompts import SYS_PROMPT
+from core.prompts import SYS_PROMPT
 from tools.agent_tools import tool_list
-from log_config import logger
-from settings import LLM_MODEL_NAME, LLM_TEMPERATURE,MAX_TOOL_ROUNDS, DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL
+from core.log_config import logger
+from core.settings import LLM_MODEL_NAME, LLM_TEMPERATURE,MAX_TOOL_ROUNDS, DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL
 # 知识库检索结果缓存（ContextVar 实现，多标签页/多请求隔离）
 # LangGraph 会丢弃 AgentState TypedDict 中未声明的 key，因此使用 ContextVar 旁路缓存
 _kb_docs_cache = contextvars.ContextVar("kb_docs_cache", default="")

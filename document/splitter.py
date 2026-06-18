@@ -2,7 +2,7 @@
 文本分片模块：摘要分片、正文精细分片
 """
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from settings import (
+from core.settings import (
     ABSTRACT_CHUNK_SIZE,
     ABSTRACT_CHUNK_OVERLAP,
     DETAIL_CHUNK_SIZE,

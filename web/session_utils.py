@@ -5,8 +5,8 @@ import os
 import uuid
 import shutil
 from langchain_core.messages import AIMessage
-from settings import TEMP_SUMMARY_DIR
-from log_config import logger
+from core.settings import TEMP_SUMMARY_DIR
+from core.log_config import logger
 
 
 def _ensure_session_id(session_state: dict) -> str:

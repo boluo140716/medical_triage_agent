@@ -5,12 +5,12 @@ import os
 import traceback
 from langchain_core.messages import HumanMessage
 from agent.graph_builder import agent_app
-from log_config import logger
-import session_store
+from core.log_config import logger
+from core import session_store
 from web.session_utils import _ensure_session_id, _get_summary_dir, _extract_answer
 
 # 保存/导出关键词白名单（单一数据源：来自 prompts.py）
-from prompts import SAVE_KEYWORDS
+from core.prompts import SAVE_KEYWORDS
 
 
 def _is_save_request(user_input: str) -> bool:

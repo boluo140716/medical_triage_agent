@@ -11,6 +11,7 @@ load_dotenv()
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FAISS_INDEX_PATH = os.path.join(_BASE_DIR, "first_faiss.index")
 MAPPING_JSON_PATH = os.path.join(_BASE_DIR, "index_mapping.json")
+KB_DOCS_DIR = os.path.join(_BASE_DIR, "kb_docs")      # 知识库文档统一存放目录
 TEMP_SUMMARY_DIR = "temp_summary"      # 摘要按会话ID存放，不参与知识库检索
 
 # ===================== LLM & Embedding 模型配置 =====================
@@ -53,4 +54,3 @@ if not TAVILY_API_KEY:
         "⚠️  TAVILY_API_KEY 未设置！联网搜索功能将不可用。"
         " 请在 .env 文件中设置 TAVILY_API_KEY=<your-key>。"
     )
-

@@ -3,11 +3,11 @@
 """
 import os
 from langchain_chroma import Chroma
-from settings import UPLOAD_MAX_FILE_SIZE_MB, UPLOAD_MAX_FILE_COUNT
+from core.settings import UPLOAD_MAX_FILE_SIZE_MB, UPLOAD_MAX_FILE_COUNT
 from document.loader import load_documents
 from document.splitter import detail_splitter
 from document.vector_store import embeddings
-from log_config import logger
+from core.log_config import logger
 from web.session_utils import _cleanup_summary_dir
 
 

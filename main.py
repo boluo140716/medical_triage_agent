@@ -4,7 +4,7 @@
 import asyncio
 from agent.graph_builder import agent_app
 from langchain_core.messages import HumanMessage, AIMessage
-from log_config import logger
+from core.log_config import logger
 import traceback
 
 

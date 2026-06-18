@@ -3,8 +3,8 @@
 """
 from langgraph.graph import END
 from langchain_core.messages import ToolMessage
-from settings import MAX_TOOL_ROUNDS
-from log_config import logger
+from core.settings import MAX_TOOL_ROUNDS
+from core.log_config import logger
 
 
 def tool_route_func(state) -> str:

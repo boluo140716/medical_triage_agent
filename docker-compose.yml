@@ -1,0 +1,15 @@
+services:
+  enterprise-kb-agent:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: enterprise-kb-agent
+    ports:
+      - "7862:7862"
+      - "7863:7863"
+    volumes:
+      - ./kb_docs:/app/kb_docs:ro
+      - ./temp_summary:/app/temp_summary
+    env_file:
+      - .env
+    restart: unless-stopped

@@ -3,9 +3,9 @@
 """
 import os
 import uuid
-from settings import TEMP_SUMMARY_DIR
-import session_store
-from log_config import logger
+from core.settings import TEMP_SUMMARY_DIR
+import core.session_store as session_store
+from core.log_config import logger
 
 
 def inject_session(session_id: str | None, save_allowed: bool = False) -> tuple[str, str]:

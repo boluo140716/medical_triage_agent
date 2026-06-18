@@ -7,8 +7,8 @@ import os
 import time
 from typing import List
 from langchain_core.documents import Document
-from log_config import logger
-from settings import BAILIAN_API_KEY, TOP_K_RERANK
+from core.log_config import logger
+from core.settings import BAILIAN_API_KEY, TOP_K_RERANK
 
 
 def rerank_documents(query: str, docs: list[Document], top_k: int = TOP_K_RERANK) -> list[Document]:

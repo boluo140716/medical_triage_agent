@@ -6,15 +6,16 @@ import json
 import faiss
 import numpy as np
 from langchain_community.embeddings import DashScopeEmbeddings
-from settings import (
+from core.settings import (
     FAISS_INDEX_PATH,
     MAPPING_JSON_PATH,
+    KB_DOCS_DIR,
     TEMP_SUMMARY_DIR,
     EMBED_MODEL_NAME,
     TOP_K_FIRST_FAISS,
     BAILIAN_API_KEY,
 )
-from log_config import logger
+from core.log_config import logger
 
 # 初始化向量化模型（阿里百炼 DashScope）
 embeddings = DashScopeEmbeddings(
@@ -42,24 +43,21 @@ def init_faiss_store():
         return
 
     logger.info("无FAISS缓存，开始全量构建索引")
-    # 遍历当前目录所有文档（排除 temp_summary 摘要临时文件夹）
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    root_dir = os.path.dirname(current_dir)
+    # 遍历 kb_docs/ 知识库文档目录
+    os.makedirs(KB_DOCS_DIR, exist_ok=True)
     supported_ext = (".txt", ".pdf", ".docx")
     file_paths = []
 
-    for filename in os.listdir(root_dir):
-        full_path = os.path.join(root_dir, filename)
-        # 跳过 temp_summary 临时摘要目录和 venv 虚拟环境目录
+    for filename in os.listdir(KB_DOCS_DIR):
+        full_path = os.path.join(KB_DOCS_DIR, filename)
         if os.path.isdir(full_path):
-            if filename == TEMP_SUMMARY_DIR:
-                logger.info(f"跳过临时摘要目录: {TEMP_SUMMARY_DIR}")
-                continue
-            if filename == "venv":
-                logger.info(f"跳过虚拟环境目录: {filename}")
-                continue
+            continue
         if filename.lower().endswith(supported_ext):
             file_paths.append(full_path)
+
+    if not file_paths:
+        logger.warning(f"知识库目录 {KB_DOCS_DIR} 中无文档，FAISS 索引为空")
+        return
 
     # 延迟导入，避免循环依赖
     from document.loader import load_documents

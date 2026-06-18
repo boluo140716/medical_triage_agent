@@ -12,16 +12,16 @@ from api.models import ChatRequest, ChatResponse
 from api.dependency import inject_session, cleanup_session
 from agent.graph_builder import agent_app
 from web.session_utils import _extract_answer
-from settings import TEMP_SUMMARY_DIR
-from log_config import logger
-import session_store
+from core.settings import TEMP_SUMMARY_DIR
+from core.log_config import logger
+from core import session_store
 
 router = APIRouter(prefix="/api", tags=["对话"])
 
 
 def _is_save_request(user_input: str) -> bool:
     """检测是否需要保存/导出"""
-    from prompts import SAVE_KEYWORDS
+    from core.prompts import SAVE_KEYWORDS
     return any(kw in user_input for kw in SAVE_KEYWORDS)
 
 
