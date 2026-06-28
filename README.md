@@ -124,7 +124,7 @@ TAVILY_API_KEY=tvly-your-tavily-key
 pip install -r requirements.txt
 ```
 
-### 启动方式（3 选 1）
+### 启动方式（4 选 1）
 
 ```bash
 # 方式 1：Gradio Web 界面 → 浏览器访问 http://localhost:7862
@@ -135,7 +135,9 @@ python run_api.py
 
 # 方式 3：控制台交互（asyncio REPL 流式输出）
 python main.py
-```
+
+#方式 4：docker命令启动（docker-compose up -d --build）
+拉取成功后，浏览器访问页面本地地址即可
 
 ## 📡 REST API 接口
 
