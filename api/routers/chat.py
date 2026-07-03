@@ -11,7 +11,7 @@ from langchain_core.messages import HumanMessage
 from api.models import ChatRequest, ChatResponse
 from api.dependency import inject_session, cleanup_session
 from agent.graph_builder import agent_app
-from web.session_utils import _extract_answer
+from core.session_utils import _extract_answer
 from core.settings import TEMP_SUMMARY_DIR
 from core.log_config import logger
 from core import session_store

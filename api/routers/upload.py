@@ -11,7 +11,7 @@ from api.dependency import inject_session, inject_chroma, cleanup_session
 from document.loader import load_documents
 from document.splitter import detail_splitter
 from document.vector_store import embeddings
-from web.session_utils import _cleanup_summary_dir
+from core.session_utils import _cleanup_summary_dir
 from core.settings import UPLOAD_MAX_FILE_SIZE_MB, UPLOAD_MAX_FILE_COUNT
 from core.log_config import logger
 

@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>企业知识库智能问答系统</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+</head>
+<body>
+<div id="app">
+    <!-- 移动端遮罩 -->
+    <div class="overlay" :class="{ show: sidebarOpen }" @click="sidebarOpen = false"></div>
+
+    <!-- 左侧边栏 -->
+    <aside class="sidebar" :class="{ open: sidebarOpen }">
+        <div class="sidebar-header">
+            <h1>📚 知识库问答</h1>
+            <button class="new-chat-btn" @click="newConversation">
+                <span>＋</span> 新建对话
+            </button>
+        </div>
+        <div class="conversation-list">
+            <div
+                v-for="conv in conversations"
+                :key="conv.id"
+                class="conversation-item"
+                :class="{ active: conv.id === currentId }"
+                @click="switchConversation(conv.id)"
+            >
+                <span style="overflow:hidden;text-overflow:ellipsis;flex:1;">{{ conv.title }}</span>
+                <button class="delete-btn" @click.stop="deleteConversation(conv.id)">✕</button>
+            </div>
+            <div v-if="conversations.length === 0" style="padding:16px;color:#9ca3af;font-size:13px;text-align:center;">
+                暂无历史对话
+            </div>
+        </div>
+    </aside>
+
+    <!-- 右侧主区域 -->
+    <main class="main-area">
+        <!-- 顶部栏 -->
+        <header class="chat-header">
+            <button class="mobile-menu-btn" @click="sidebarOpen = !sidebarOpen">☰</button>
+            <h2>{{ currentTitle }}</h2>
+            <span style="color:#9ca3af;font-size:12px;">{{ currentId ? '会话: ' + currentId.slice(0,8) : '' }}</span>
+        </header>
+
+        <!-- 消息区域 -->
+        <div class="chat-messages" ref="chatContainer" v-if="currentMessages.length > 0">
+            <div
+                v-for="(msg, idx) in currentMessages"
+                :key="idx"
+                class="message"
+                :class="msg.role"
+            >
+                <div class="message-content">
+                    <div v-if="msg.role === 'assistant' && msg.content === '' && idx === currentMessages.length - 1"
+                         class="loading">⏳ 思考中...</div>
+                    <div v-else style="white-space:pre-wrap;">{{ msg.content }}</div>
+                    <a v-if="msg.downloadUrl"
+                       class="download-link"
+                       :href="msg.downloadUrl"
+                       download>📥 点击下载总结文件</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- 空状态 -->
+        <div class="empty-state" v-else>
+            <div class="icon">📚</div>
+            <h3>企业内部知识库智能问答</h3>
+            <p>内部文档检索 · 行业资讯联网 · 文档总结导出</p>
+        </div>
+
+        <!-- 底部输入区 -->
+        <div class="input-area">
+            <!-- 已上传文件标签 -->
+            <div class="uploaded-files" v-if="uploadedFiles.length > 0">
+                <span class="uploaded-file-tag" v-for="(f, i) in uploadedFiles" :key="i">
+                    📄 {{ f }}
+                    <span class="remove-file" @click="removeFile(i)">✕</span>
+                </span>
+            </div>
+
+            <div class="input-row">
+                <div class="input-wrapper">
+                    <textarea
+                        ref="inputBox"
+                        v-model="inputText"
+                        @keydown.enter.exact.prevent="sendMessage"
+                        @keydown.enter.shift.exact="inputText += '\n'"
+                        placeholder="请输入问题，例如：试用期离职需要提前多久告知？"
+                        rows="1"
+                        :disabled="loading"
+                    ></textarea>
+                    <label class="file-upload-btn" title="上传文档">
+                        📎
+                        <input type="file" ref="fileInput" multiple accept=".pdf,.docx,.txt,.md,.xlsx,.xls"
+                               @change="handleFileUpload" :disabled="loading">
+                    </label>
+                </div>
+                <button class="send-btn" @click="sendMessage" :disabled="loading || !inputText.trim()">
+                    <span v-if="!loading">↑</span>
+                    <span v-else style="font-size:12px;">⏳</span>
+                </button>
+            </div>
+        </div>
+    </main>
+</div>
+
+<script>
+const { createApp } = Vue;
+
+createApp({
+    data() {
+        return {
+            sidebarOpen: false,
+            conversations: [],
+            currentId: null,
+            inputText: '',
+            loading: false,
+            uploadedFiles: [],
+            uploadedChroma: null,
+        };
+    },
+
+    computed: {
+        currentConversation() {
+            return this.conversations.find(c => c.id === this.currentId) || null;
+        },
+        currentMessages() {
+            return this.currentConversation ? this.currentConversation.messages : [];
+        },
+        currentTitle() {
+            return this.currentConversation ? this.currentConversation.title : '新对话';
+        },
+    },
+
+    created() {
+        this.loadFromStorage();
+        if (this.conversations.length === 0) {
+            this.newConversation();
+        }
+    },
+
+    methods: {
+        /* ========== 会话管理 ========== */
+        newConversation() {
+            const id = this.generateId();
+            this.conversations.unshift({
+                id,
+                title: '新对话',
+                messages: [],
+                createdAt: Date.now(),
+            });
+            this.currentId = id;
+            this.sidebarOpen = false;
+            this.saveToStorage();
+        },
+
+        switchConversation(id) {
+            this.currentId = id;
+            this.sidebarOpen = false;
+            this.$nextTick(() => this.scrollToBottom());
+        },
+
+        deleteConversation(id) {
+            this.conversations = this.conversations.filter(c => c.id !== id);
+            if (this.currentId === id) {
+                this.currentId = this.conversations.length > 0 ? this.conversations[0].id : null;
+                if (!this.currentId) this.newConversation();
+            }
+            this.saveToStorage();
+        },
+
+        /* ========== 发送消息 ========== */
+        async sendMessage() {
+            const text = this.inputText.trim();
+            if (!text || this.loading) return;
+
+            const conv = this.currentConversation;
+            if (!conv) return;
+
+            this.inputText = '';
+            this.loading = true;
+
+            conv.messages.push({ role: 'user', content: text });
+            const assistantMsg = { role: 'assistant', content: '' };
+            conv.messages.push(assistantMsg);
+
+            // 自动更新标题
+            if (conv.title === '新对话') {
+                conv.title = text.slice(0, 20) + (text.length > 20 ? '...' : '');
+            }
+
+            this.$nextTick(() => this.scrollToBottom());
+
+            try {
+                await this.streamChat(text, conv.id, assistantMsg);
+            } catch (e) {
+                assistantMsg.content = '抱歉，请求失败：' + e.message;
+            } finally {
+                this.loading = false;
+                this.saveToStorage();
+                this.$nextTick(() => this.scrollToBottom());
+            }
+        },
+
+        /* ========== SSE 流式对话 ========== */
+        async streamChat(question, sessionId, assistantMsg) {
+            const response = await fetch('/api/chat/stream', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ question, session_id: sessionId }),
+            });
+
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({ detail: '请求失败' }));
+                throw new Error(err.detail || '请求失败');
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(line.slice(6));
+                            if (data.type === 'token') {
+                                assistantMsg.content += data.content;
+                                this.$nextTick(() => this.scrollToBottom());
+                            } else if (data.type === 'done') {
+                                if (data.download_url) {
+                                    assistantMsg.downloadUrl = data.download_url;
+                                }
+                            } else if (data.type === 'error') {
+                                assistantMsg.content = data.message;
+                            }
+                        } catch (e) { /* 忽略解析错误 */ }
+                    }
+                }
+            }
+        },
+
+        /* ========== 文件上传 ========== */
+        async handleFileUpload(e) {
+            const files = e.target.files;
+            if (!files || files.length === 0) return;
+
+            this.loading = true;
+            const formData = new FormData();
+            for (const f of files) {
+                formData.append('files', f);
+            }
+
+            try {
+                const resp = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData,
+                });
+                const result = await resp.json();
+                if (result.status === 'success') {
+                    for (const f of files) {
+                        if (!this.uploadedFiles.includes(f.name)) {
+                            this.uploadedFiles.push(f.name);
+                        }
+                    }
+                    this.addSystemMessage('📂 已上传并索引 ' + result.file_count + ' 个文件，共 ' + result.chunk_count + ' 个分片');
+                } else {
+                    this.addSystemMessage('⚠️ 上传失败：' + result.message);
+                }
+            } catch (e) {
+                this.addSystemMessage('⚠️ 上传异常：' + e.message);
+            } finally {
+                this.loading = false;
+                this.$refs.fileInput.value = '';
+            }
+        },
+
+        removeFile(index) {
+            this.uploadedFiles.splice(index, 1);
+            this.addSystemMessage('📭 已移除文件（临时文档已清空）');
+        },
+
+        addSystemMessage(content) {
+            const conv = this.currentConversation;
+            if (conv) {
+                conv.messages.push({ role: 'assistant', content });
+                this.saveToStorage();
+                this.$nextTick(() => this.scrollToBottom());
+            }
+        },
+
+        /* ========== 辅助 ========== */
+        generateId() {
+            return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+        },
+
+        scrollToBottom() {
+            const el = this.$refs.chatContainer;
+            if (el) {
+                el.scrollTop = el.scrollHeight;
+            }
+        },
+
+        saveToStorage() {
+            const data = {
+                conversations: this.conversations,
+                currentId: this.currentId,
+            };
+            localStorage.setItem('kb_chat_data', JSON.stringify(data));
+        },
+
+        loadFromStorage() {
+            try {
+                const raw = localStorage.getItem('kb_chat_data');
+                if (raw) {
+                    const data = JSON.parse(raw);
+                    this.conversations = data.conversations || [];
+                    this.currentId = data.currentId || null;
+                }
+            } catch (e) {
+                this.conversations = [];
+                this.currentId = null;
+            }
+        },
+    },
+}).mount('#app');
+</script>
+</body>
+</html>

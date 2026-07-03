@@ -26,6 +26,43 @@ def _deduplicate_docs(docs: list) -> list:
             unique.append(doc)
     return unique
 
+def _rewrite_query_for_search(query: str) -> str:
+    """
+    HyDE（假设文档嵌入）Query 改写：
+    让 LLM 生成一段假设答案，用假设答案做向量检索。
+
+    原理：假设答案和真实知识库文档都是「陈述句」风格，向量距离更近，
+    比关键词改写召回率更高。
+
+    示例：
+      用户问："公司出差住宿是怎么报销的"
+      LLM 编："出差住宿报销标准为一线城市不超过320元每晚..."
+      → 用这一段去检索 → 命中真实制度文档
+    """
+    try:
+        from langchain_openai import ChatOpenAI
+        from core.settings import LLM_MODEL_NAME, DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL
+        rewrite_llm = ChatOpenAI(
+            model=LLM_MODEL_NAME,
+            temperature=0,
+            api_key=DEEPSEEK_API_KEY,
+            base_url=DEEPSEEK_BASE_URL,
+        )
+        prompt = f"""你是一个企业知识库助手。请根据以下问题，用一段话（50-100字）描述你所期望的知识库文档中可能包含的内容。
+不需要真实答案，只需要模拟文档的表述风格：
+
+问题：{query}
+
+模拟文档内容："""
+        resp = rewrite_llm.invoke(prompt)
+        hyde_text = resp.content.strip()
+        if hyde_text and len(hyde_text) > 10:
+            logger.info(f"HyDE 改写: '{query[:50]}...' → '{hyde_text[:80]}...'")
+            return hyde_text
+    except Exception as e:
+        logger.warning(f"HyDE 改写失败，使用原始查询: {e}")
+    return query
+
 
 @tool
 def search_knowledge_base(query: str) -> str:
@@ -33,10 +70,18 @@ def search_knowledge_base(query: str) -> str:
     企业本地知识库检索工具，读取PDF/DOCX/TXT内部文档
     :param query: 用户检索关键词/问题
     """
-    # 1. 全局 FAISS 持久知识库检索
-    faiss_docs = multi_hybrid_retrieve(query)
+    # 0. Query 改写：将口语化问题转为检索关键词（提升召回率）
+    search_query = _rewrite_query_for_search(query)
 
-    # 2. 当前会话临时 Chroma 检索（用户上传文档）
+    # 1. 全局 FAISS 持久知识库检索（用改写后的关键词）
+    faiss_docs = multi_hybrid_retrieve(search_query)
+
+    # 若改写后无结果，用原始查询再试一次
+    if not faiss_docs and search_query != query:
+        logger.info(f"改写词无结果，回退原始查询: '{query[:50]}...'")
+        faiss_docs = multi_hybrid_retrieve(query)
+
+    # 2. 当前会话临时 Chroma 检索（用户上传文档，用原始查询保留语义）
     temp_docs = []
     try:
         temp_chroma = session_store.get_current_chroma()

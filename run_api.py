@@ -13,6 +13,6 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=7863,
         reload=True,
-        reload_dirs=["api", "agent", "tools", "document", "web"],
+        reload_dirs=["api", "agent", "tools", "document"],
         log_level="warning",
     )
