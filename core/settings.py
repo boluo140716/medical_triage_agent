@@ -8,7 +8,7 @@ import os
 load_dotenv()
 
 # ===================== 文件路径配置 =====================
-_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FAISS_INDEX_PATH = os.path.join(_BASE_DIR, "first_faiss.index")
 MAPPING_JSON_PATH = os.path.join(_BASE_DIR, "index_mapping.json")
 KB_DOCS_DIR = os.path.join(_BASE_DIR, "kb_docs")      # 知识库文档统一存放目录

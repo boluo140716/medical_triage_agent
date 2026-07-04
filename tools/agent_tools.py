@@ -48,12 +48,12 @@ def _rewrite_query_for_search(query: str) -> str:
             api_key=DEEPSEEK_API_KEY,
             base_url=DEEPSEEK_BASE_URL,
         )
-        prompt = f"""你是一个企业知识库助手。请根据以下问题，用一段话（50-100字）描述你所期望的知识库文档中可能包含的内容。
-不需要真实答案，只需要模拟文档的表述风格：
+        prompt = f"""你是一个企业知识库助手。请根据以下问题，用一段简短的话（30-60字）描述知识库文档中可能包含的相关内容。
+注意：不要编造完整答案，只写和问题相关的核心关键词和短语，模仿公司制度文档的表述风格。
 
 问题：{query}
 
-模拟文档内容："""
+文档片段："""
         resp = rewrite_llm.invoke(prompt)
         hyde_text = resp.content.strip()
         if hyde_text and len(hyde_text) > 10:
@@ -70,16 +70,18 @@ def search_knowledge_base(query: str) -> str:
     企业本地知识库检索工具，读取PDF/DOCX/TXT内部文档
     :param query: 用户检索关键词/问题
     """
-    # 0. Query 改写：将口语化问题转为检索关键词（提升召回率）
-    search_query = _rewrite_query_for_search(query)
+    # 0. HyDE 改写：生成假设文档，用于向量检索（提升召回率）
+    hyde_query = _rewrite_query_for_search(query)
 
-    # 1. 全局 FAISS 持久知识库检索（用改写后的关键词）
-    faiss_docs = multi_hybrid_retrieve(search_query)
+    # 1. 双路检索：HyDE + 原始查询各搜一次，合并去重
+    #    单靠 HyDE 可能因为用词不一致而漏召回，双路互补更稳健
+    faiss_docs_hyde = multi_hybrid_retrieve(hyde_query) if hyde_query != query else []
+    faiss_docs_raw = multi_hybrid_retrieve(query)
 
-    # 若改写后无结果，用原始查询再试一次
-    if not faiss_docs and search_query != query:
-        logger.info(f"改写词无结果，回退原始查询: '{query[:50]}...'")
-        faiss_docs = multi_hybrid_retrieve(query)
+    # 合并：HyDE 结果排前（语义更接近），原始查询结果排后
+    faiss_docs = faiss_docs_hyde + faiss_docs_raw
+    if faiss_docs:
+        faiss_docs = _deduplicate_docs(faiss_docs)
 
     # 2. 当前会话临时 Chroma 检索（用户上传文档，用原始查询保留语义）
     temp_docs = []

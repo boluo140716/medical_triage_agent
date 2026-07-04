@@ -7,6 +7,10 @@
 """
 import contextvars
 
+from core.log_config import logger
+
+
+
 # ---- Chroma 临时文档 ----
 _current_chroma = contextvars.ContextVar('current_chroma', default=None)
 _current_file_info = contextvars.ContextVar('current_file_info', default=None)

@@ -1,9 +1,155 @@
 """
 文档加载模块：支持 txt / pdf / docx / markdown / excel 多格式文档读取
+PDF：文字提取 + 内嵌图片 EasyOCR 并行，合并结果；纯扫描件自动整页 OCR 兜底
 """
 import os
-from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader,UnstructuredMarkdownLoader,UnstructuredExcelLoader
+import numpy as np
+from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader, UnstructuredMarkdownLoader, UnstructuredExcelLoader
+from langchain_core.documents import Document
 from core.log_config import logger
+
+OCR_MIN_TEXT_LENGTH = 50
+
+_ocr_engine = None
+
+
+def _get_ocr():
+    """懒加载 EasyOCR 单例，避免重复初始化（首次加载需下载模型约 100MB）"""
+    global _ocr_engine
+    if _ocr_engine is None:
+        try:
+            import easyocr
+            _ocr_engine = easyocr.Reader(['ch_sim', 'en'], gpu=False)
+            logger.info("EasyOCR 初始化完成（中英文）")
+        except ImportError:
+            logger.error("EasyOCR 未安装，请执行: pip install easyocr")
+            raise
+    return _ocr_engine
+
+
+def _ocr_image(img_array: np.ndarray) -> str:
+    """对单张图片执行 OCR，返回识别文本"""
+    try:
+        reader = _get_ocr()
+        result = reader.readtext(img_array, detail=0)
+        return "\n".join(result) if result else ""
+    except Exception:
+        return ""
+
+
+def _load_pdf_with_ocr(path: str):
+    """
+    PDF 加载：文字提取 + 内嵌图片 OCR 并行，合并结果
+    """
+    try:
+        import fitz
+    except ImportError:
+        logger.warning("pymupdf 未安装，回退 PyPDFLoader")
+        return PyPDFLoader(path).load()
+
+    all_docs = []
+    total_text = ""
+
+    try:
+        pdf_doc = fitz.open(path)
+
+        for page_num in range(len(pdf_doc)):
+            page = pdf_doc[page_num]
+            page_text = page.get_text().strip()
+            total_text += page_text
+
+            image_texts = _ocr_page_images(page, pdf_doc)
+
+            combined = page_text
+            if image_texts:
+                combined += "\n" + "\n".join(image_texts)
+
+            if combined.strip():
+                all_docs.append(Document(
+                    page_content=combined,
+                    metadata={"source": path, "page": page_num + 1}
+                ))
+
+        pdf_doc.close()
+
+        if len(total_text) < OCR_MIN_TEXT_LENGTH:
+            logger.info(f"PDF 全文仅 {len(total_text)} 字符，启动整页 OCR 兜底")
+            ocr_docs = _ocr_pdf_pages_full(path)
+            if ocr_docs:
+                all_docs = ocr_docs
+
+        logger.info(f"PDF 加载完成: {path}，共 {len(all_docs)} 页")
+
+    except Exception as e:
+        logger.error(f"PDF 加载失败: {e}，回退 PyPDFLoader")
+        return PyPDFLoader(path).load()
+
+    return all_docs if all_docs else PyPDFLoader(path).load()
+
+
+def _ocr_page_images(page, pdf_doc) -> list:
+    """提取 PDF 页面内嵌图片，EasyOCR 识别"""
+    image_texts = []
+    try:
+        from PIL import Image
+        import io
+
+        image_list = page.get_images(full=True)
+        if not image_list:
+            return image_texts
+
+        for img_info in image_list:
+            try:
+                xref = img_info[0]
+                base_image = pdf_doc.extract_image(xref)
+                image_bytes = base_image["image"]
+                img = Image.open(io.BytesIO(image_bytes))
+
+                if img.width < 50 or img.height < 50:
+                    continue
+
+                img_array = np.array(img.convert("RGB"))
+                text = _ocr_image(img_array)
+                if text:
+                    image_texts.append(text)
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    return image_texts
+
+
+def _ocr_pdf_pages_full(path: str) -> list:
+    """整页 OCR 兜底：纯扫描件 PDF 逐页渲染后 OCR"""
+    try:
+        import fitz
+        from PIL import Image
+        import io
+
+        ocr_docs = []
+        pdf_doc = fitz.open(path)
+
+        for page_num in range(len(pdf_doc)):
+            page = pdf_doc[page_num]
+            mat = fitz.Matrix(2.0, 2.0)
+            pix = page.get_pixmap(matrix=mat)
+            img = Image.open(io.BytesIO(pix.tobytes("png")))
+            img_array = np.array(img.convert("RGB"))
+            text = _ocr_image(img_array)
+            if text:
+                ocr_docs.append(Document(
+                    page_content=text,
+                    metadata={"source": path, "page": page_num + 1, "ocr": "full_page"}
+                ))
+
+        pdf_doc.close()
+        logger.info(f"整页 OCR 完成: {path}，共 {len(ocr_docs)} 页")
+    except Exception as e:
+        logger.error(f"整页 OCR 失败: {e}")
+        return []
+
+    return ocr_docs
 
 
 def _load_txt_with_fallback(path: str):
@@ -42,7 +188,7 @@ def load_documents(file_paths: list[str]):
             if ext == ".txt":
                 docs = _load_txt_with_fallback(path)
             elif ext == ".pdf":
-                docs = PyPDFLoader(path).load()
+                docs = _load_pdf_with_ocr(path)
             elif ext == ".docx":
                 docs = Docx2txtLoader(path).load()
             elif ext == ".md":
