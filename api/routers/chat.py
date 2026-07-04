@@ -15,14 +15,39 @@ from core.session_utils import _extract_answer
 from core.settings import TEMP_SUMMARY_DIR
 from core.log_config import logger
 from core import session_store
+from core.prompts import SAVE_KEYWORDS
 
 router = APIRouter(prefix="/api", tags=["对话"])
 
 
 def _is_save_request(user_input: str) -> bool:
     """检测是否需要保存/导出"""
-    from core.prompts import SAVE_KEYWORDS
     return any(kw in user_input for kw in SAVE_KEYWORDS)
+
+
+# XML 工具调用标记（DeepSeek 可能输出文本形式 tool_calls）
+_XML_TOOL_MARKERS = ("<｜tool_calls", "<｜tool_call", "<tool_calls>", "<tool_call>", "<｜invoke", "<invoke")
+
+
+def _has_xml_tool_start(text: str) -> bool:
+    """检测文本中是否包含 XML 工具调用开始标记"""
+    return any(m in text for m in _XML_TOOL_MARKERS)
+
+
+def _strip_xml_content(text: str) -> str:
+    """提取 XML 工具调用之前的内容，只保留纯文本部分"""
+    import re
+    # 找到第一个 XML 标记的位置，截取之前的内容
+    first_idx = min(
+        (text.find(m) for m in _XML_TOOL_MARKERS if m in text),
+        default=-1
+    )
+    if first_idx > 0:
+        return text[:first_idx].strip()
+    # 兜底：正则剥离全部 XML 标签
+    cleaned = re.sub(r'<[｜tool_call|invoke|parameter|/].*?>', '', text, flags=re.DOTALL)
+    cleaned = re.sub(r'\n\s*\n', '\n\n', cleaned).strip()
+    return cleaned
 
 
 async def _stream_chat_events(user_input: str, session_id: str):
@@ -34,14 +59,23 @@ async def _stream_chat_events(user_input: str, session_id: str):
       data: {"type": "token", "content": "好"}
       ...
       data: {"type": "done", "session_id": "abc123"}
+      data: {"type": "clean", "content": "..."}  (XML 工具调用被过滤后的清理内容)
     """
     try:
         graph_config = {"configurable": {"thread_id": session_id}}
+        cancel_event = session_store.get_cancel_event(session_id)
+        accumulated = ""  # 累积本轮 LLM 输出，用于检测 XML 工具调用
+        xml_detected = False
         async for event in agent_app.astream_events(
             {"messages": [HumanMessage(content=user_input)]},
             config=graph_config,
             version="v2"
         ):
+            # 检查取消标记
+            if cancel_event.is_set():
+                logger.info(f"会话 {session_id[:8]}... 收到取消请求，中断流式输出")
+                yield f"data: {json.dumps({'type': 'cancelled', 'message': '已停止生成'}, ensure_ascii=False)}\n\n"
+                return
             try:
                 kind = event.get("event")
                 if kind == "on_chat_model_stream":
@@ -49,7 +83,16 @@ async def _stream_chat_events(user_input: str, session_id: str):
                     if chunk_data and hasattr(chunk_data, "content"):
                         content = chunk_data.content
                         if content:
-                            yield f"data: {json.dumps({'type': 'token', 'content': content}, ensure_ascii=False)}\n\n"
+                            accumulated += content
+                            # 检测 XML 工具调用开始标记
+                            if not xml_detected and _has_xml_tool_start(accumulated):
+                                xml_detected = True
+                                # 只保留 XML 之前的内容，发送清理事件
+                                clean = _strip_xml_content(accumulated)
+                                if clean:
+                                    yield f"data: {json.dumps({'type': 'clean', 'content': clean}, ensure_ascii=False)}\n\n"
+                            if not xml_detected:
+                                yield f"data: {json.dumps({'type': 'token', 'content': content}, ensure_ascii=False)}\n\n"
             except Exception:
                 continue
 
@@ -65,6 +108,7 @@ async def _stream_chat_events(user_input: str, session_id: str):
         logger.error(f"SSE 流式异常: {type(e).__name__}: {e}")
         yield f"data: {json.dumps({'type': 'error', 'message': '回答生成中断，请重试'}, ensure_ascii=False)}\n\n"
     finally:
+        session_store.clear_cancel_event(session_id)
         cleanup_session()
 
 
@@ -82,9 +126,6 @@ async def download_file(session_id: str):
     with open(filepath, "r", encoding="utf-8") as f:
         content = f.read()
 
-    # 下载后清理内存缓存
-    session_store.remove_stored_summary(session_id)
-
     return Response(
         content=content.encode("utf-8"),
         media_type="text/plain; charset=utf-8",
@@ -92,6 +133,16 @@ async def download_file(session_id: str):
             "Content-Disposition": f"attachment; filename=summary_{session_id}.txt"
         },
     )
+
+
+@router.post("/chat/stop")
+async def stop_chat(req: ChatRequest):
+    """停止当前会话的流式生成"""
+    session_id = req.session_id
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id 不能为空")
+    session_store.set_cancel_event(session_id)
+    return {"status": "ok", "message": "已发送停止信号"}
 
 
 @router.post("/chat/stream")

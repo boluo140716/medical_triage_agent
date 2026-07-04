@@ -47,3 +47,8 @@ from api.routers import chat, upload
 
 app.include_router(chat.router)
 app.include_router(upload.router)
+
+# 启动时预加载 EasyOCR 模型（后台线程，不阻塞启动）
+import threading
+from tools.image_analyzer import preload_ocr
+threading.Thread(target=preload_ocr, daemon=True).start()

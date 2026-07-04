@@ -3,16 +3,31 @@ Agent 自定义工具集合：知识库检索、联网搜索、文档保存
 """
 import os
 from langchain.tools import tool
+from langchain_openai import ChatOpenAI
 from tavily import TavilyClient
 from duckduckgo_search import DDGS
-from core.settings import TAVILY_API_KEY, TEMP_SUMMARY_DIR, UPLOAD_TOP_K_TEMP
+from core.settings import TAVILY_API_KEY, TEMP_SUMMARY_DIR, UPLOAD_TOP_K_TEMP, LLM_MODEL_NAME, DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL
 from agent.retriever import multi_hybrid_retrieve
 from core.utils import format_retrieve_docs
 from core.log_config import logger
 from core import session_store
 
-# 初始化联网搜索客户端
 tavily = TavilyClient(api_key=TAVILY_API_KEY)
+
+# HyDE 改写专用 LLM（懒加载单例，避免每次检索都新建实例）
+_hyde_llm = None
+
+
+def _get_hyde_llm():
+    global _hyde_llm
+    if _hyde_llm is None:
+        _hyde_llm = ChatOpenAI(
+            model=LLM_MODEL_NAME,
+            temperature=0,
+            api_key=DEEPSEEK_API_KEY,
+            base_url=DEEPSEEK_BASE_URL,
+        )
+    return _hyde_llm
 
 
 def _deduplicate_docs(docs: list) -> list:
@@ -27,34 +42,15 @@ def _deduplicate_docs(docs: list) -> list:
     return unique
 
 def _rewrite_query_for_search(query: str) -> str:
-    """
-    HyDE（假设文档嵌入）Query 改写：
-    让 LLM 生成一段假设答案，用假设答案做向量检索。
-
-    原理：假设答案和真实知识库文档都是「陈述句」风格，向量距离更近，
-    比关键词改写召回率更高。
-
-    示例：
-      用户问："公司出差住宿是怎么报销的"
-      LLM 编："出差住宿报销标准为一线城市不超过320元每晚..."
-      → 用这一段去检索 → 命中真实制度文档
-    """
+    """HyDE 改写：让 LLM 生成假设答案用于向量检索，提升召回率"""
     try:
-        from langchain_openai import ChatOpenAI
-        from core.settings import LLM_MODEL_NAME, DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL
-        rewrite_llm = ChatOpenAI(
-            model=LLM_MODEL_NAME,
-            temperature=0,
-            api_key=DEEPSEEK_API_KEY,
-            base_url=DEEPSEEK_BASE_URL,
-        )
         prompt = f"""你是一个医学知识库助手。请根据以下问题，用一段简短的话（30-60字）描述医学知识库文档中可能包含的相关内容。
 注意：不要编造完整答案，只写和问题相关的核心关键词和短语，模仿医学百科的表述风格。
 
 问题：{query}
 
 文档片段："""
-        resp = rewrite_llm.invoke(prompt)
+        resp = _get_hyde_llm().invoke(prompt)
         hyde_text = resp.content.strip()
         if hyde_text and len(hyde_text) > 10:
             logger.info(f"HyDE 改写: '{query[:50]}...' → '{hyde_text[:80]}...'")
@@ -67,7 +63,7 @@ def _rewrite_query_for_search(query: str) -> str:
 @tool
 def search_knowledge_base(query: str) -> str:
     """
-    企业本地知识库检索工具，读取PDF/DOCX/TXT内部文档
+    医学知识库检索工具，读取PDF/DOCX/TXT内部文档
     :param query: 用户检索关键词/问题
     """
     # 0. HyDE 改写：生成假设文档，用于向量检索（提升召回率）
@@ -78,10 +74,8 @@ def search_knowledge_base(query: str) -> str:
     faiss_docs_hyde = multi_hybrid_retrieve(hyde_query) if hyde_query != query else []
     faiss_docs_raw = multi_hybrid_retrieve(query)
 
-    # 合并：HyDE 结果排前（语义更接近），原始查询结果排后
-    faiss_docs = faiss_docs_hyde + faiss_docs_raw
-    if faiss_docs:
-        faiss_docs = _deduplicate_docs(faiss_docs)
+    # 合并：HyDE 结果排前，原始查询结果排后，合并后一次性去重
+    faiss_docs = _deduplicate_docs(faiss_docs_hyde + faiss_docs_raw) if faiss_docs_hyde else faiss_docs_raw
 
     # 2. 当前会话临时 Chroma 检索（用户上传文档，用原始查询保留语义）
     temp_docs = []

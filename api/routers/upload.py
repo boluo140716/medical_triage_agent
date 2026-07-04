@@ -6,7 +6,7 @@ import traceback
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form
 from langchain_chroma import Chroma
 
-from api.models import UploadResponse, SessionClearResponse
+from api.models import UploadResponse, SessionClearResponse, ImageAnalysisResponse
 from api.dependency import inject_session, inject_chroma, cleanup_session
 from document.loader import load_documents
 from document.splitter import detail_splitter
@@ -14,6 +14,7 @@ from document.vector_store import embeddings
 from core.session_utils import _cleanup_summary_dir
 from core.settings import UPLOAD_MAX_FILE_SIZE_MB, UPLOAD_MAX_FILE_COUNT
 from core.log_config import logger
+from tools.image_analyzer import analyze_image
 
 router = APIRouter(prefix="/api/upload", tags=["文件上传"])
 
@@ -133,3 +134,21 @@ async def clear_upload(session_id: str = Form(default="", description="会话 ID
         _cleanup_summary_dir(session_id)
         return SessionClearResponse(message="已清空全部上传文件与摘要")
     return SessionClearResponse(message="会话不存在或已清空")
+
+
+@router.post("/image", response_model=ImageAnalysisResponse)
+async def upload_image(file: UploadFile = File(..., description="医学图片")):
+    """上传医学图片，返回 OCR 文字提取 + 多模态视觉描述"""
+    allowed_types = ["image/jpeg", "image/png", "image/webp", "image/jpg"]
+    if file.content_type not in allowed_types:
+        raise HTTPException(status_code=400, detail=f"仅支持 {', '.join(allowed_types)} 格式")
+
+    content = await file.read()
+    size_mb = len(content) / (1024 * 1024)
+    if size_mb > 10:
+        raise HTTPException(status_code=400, detail="图片大小不能超过 10MB")
+
+    logger.info(f"收到图片分析请求: {file.filename} ({size_mb:.1f}MB)")
+    description = analyze_image(content)
+
+    return ImageAnalysisResponse(status="success", description=description)

@@ -35,3 +35,9 @@ class HealthResponse(BaseModel):
     """健康检查"""
     status: str
     service: str
+
+
+class ImageAnalysisResponse(BaseModel):
+    """图片分析结果"""
+    status: str
+    description: str = Field(description="图片分析后的文字描述")

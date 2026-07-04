@@ -6,6 +6,7 @@
 - Summary：按会话 ID 存放在 temp_summary/<session_id>/，关闭/清空自动删除
 """
 import contextvars
+import asyncio
 
 from core.log_config import logger
 
@@ -25,8 +26,6 @@ _current_session_id = contextvars.ContextVar('current_session_id', default=None)
 # ---- Summary 摘要导出 ----
 # 当前会话的摘要目录路径（temp_summary/<session_id>/）
 _current_summary_dir = contextvars.ContextVar('current_summary_dir', default=None)
-# 最近一次 save_summary_to_txt 生成的摘要完整文本（供 Web 预览）
-_current_summary_content = contextvars.ContextVar('current_summary_content', default=None)
 
 
 # ===================== Chroma =====================
@@ -69,26 +68,28 @@ def get_current_session_id() -> str | None:
     return _current_session_id.get()
 
 
-# ===================== Summary =====================
+# ===================== 取消标记 =====================
 
-# 按会话 ID 存储摘要内容（供下载接口读取）
-_summary_store: dict[str, str] = {}
-
-
-def store_summary(session_id: str, content: str):
-    """按会话 ID 存储摘要内容"""
-    _summary_store[session_id] = content
+_cancel_events: dict[str, asyncio.Event] = {}
 
 
-def get_stored_summary(session_id: str) -> str | None:
-    """按会话 ID 读取摘要内容"""
-    return _summary_store.get(session_id)
+def set_cancel_event(session_id: str):
+    """设置取消标记，通知正在进行的流式生成中断"""
+    if session_id in _cancel_events:
+        _cancel_events[session_id].set()
+        logger.info(f"会话 {session_id[:8]}... 取消标记已设置")
 
 
-def remove_stored_summary(session_id: str):
-    """下载后清理"""
-    _summary_store.pop(session_id, None)
-    logger.info(f"已清理会话 {session_id} 内存摘要缓存")
+def get_cancel_event(session_id: str) -> asyncio.Event:
+    """获取或创建取消事件"""
+    if session_id not in _cancel_events:
+        _cancel_events[session_id] = asyncio.Event()
+    return _cancel_events[session_id]
+
+
+def clear_cancel_event(session_id: str):
+    """清除取消标记"""
+    _cancel_events.pop(session_id, None)
 
 def set_summary_dir(summary_dir):
     """注入当前会话的摘要存放目录"""
@@ -100,16 +101,6 @@ def get_summary_dir():
     return _current_summary_dir.get()
 
 
-def set_summary_content(content):
-    """存入最近一次摘要文本（供 Web 预览面板读取）"""
-    _current_summary_content.set(content)
-
-
-def get_summary_content():
-    """获取最近一次摘要文本"""
-    return _current_summary_content.get()
-
-
 # ===================== 清理 =====================
 
 def clear_current():
@@ -118,7 +109,6 @@ def clear_current():
     _current_file_info.set(None)
     _current_save_allowed.set(False)
     _current_summary_dir.set(None)
-    _current_summary_content.set(None)
 
     # 同时清除 agent/nodes.py 中的 KB 文档缓存，防止跨请求数据泄露
     try:

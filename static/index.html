@@ -55,9 +55,10 @@
                 :class="msg.role"
             >
                 <div class="message-content">
+                    <img v-if="msg.imageUrl" :src="msg.imageUrl" class="chat-image" @click="previewImage(msg.imageUrl)">
                     <div v-if="msg.role === 'assistant' && msg.content === '' && idx === currentMessages.length - 1"
                          class="loading">⏳ 思考中...</div>
-                    <div v-else style="white-space:pre-wrap;">{{ msg.content }}</div>
+                    <div v-else-if="msg.content" style="white-space:pre-wrap;">{{ msg.content }}</div>
                     <a v-if="msg.downloadUrl"
                        class="download-link"
                        :href="msg.downloadUrl"
@@ -91,7 +92,7 @@
                         v-model="inputText"
                         @keydown.enter.exact.prevent="sendMessage"
                         @keydown.enter.shift.exact="inputText += '\n'"
-                        placeholder="请输入问题，例如：试用期离职需要提前多久告知？"
+                        placeholder="请输入您的症状描述:"
                         rows="1"
                         :disabled="loading"
                     ></textarea>
@@ -100,10 +101,18 @@
                         <input type="file" ref="fileInput" multiple accept=".pdf,.docx,.txt,.md,.xlsx,.xls"
                                @change="handleFileUpload" :disabled="loading">
                     </label>
+                    <label class="image-upload-btn" title="上传图片">
+                        📷
+                        <input type="file" ref="imageInput" accept="image/*"
+                               @change="handleImageUpload" :disabled="loading">
+                    </label>
                 </div>
-                <button class="send-btn" @click="sendMessage" :disabled="loading || !inputText.trim()">
+                <button class="send-btn" @click="loading ? stopGeneration() : sendMessage()" 
+                        :class="{'stop-btn': loading}"
+                        :disabled="!loading && !inputText.trim()"
+                        :title="loading ? '停止生成' : '发送'">
                     <span v-if="!loading">↑</span>
-                    <span v-else style="font-size:12px;">⏳</span>
+                    <span v-else class="stop-icon">■</span>
                 </button>
             </div>
         </div>
@@ -185,6 +194,7 @@ createApp({
 
             this.inputText = '';
             this.loading = true;
+            this._abortController = new AbortController();
 
             conv.messages.push({ role: 'user', content: text });
             const assistantMsg = { role: 'assistant', content: '' };
@@ -200,11 +210,30 @@ createApp({
             try {
                 await this.streamChat(text, conv.id, assistantMsg);
             } catch (e) {
-                assistantMsg.content = '抱歉，请求失败：' + e.message;
+                if (e.name === 'AbortError') {
+                    assistantMsg.content = assistantMsg.content || '⏹ 已停止生成';
+                } else {
+                    assistantMsg.content = '抱歉，请求失败：' + e.message;
+                }
             } finally {
                 this.loading = false;
+                this._abortController = null;
                 this.saveToStorage();
                 this.$nextTick(() => this.scrollToBottom());
+            }
+        },
+
+        async stopGeneration() {
+            if (!this.currentId) return;
+            try {
+                await fetch('/api/chat/stop', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question: '', session_id: this.currentId }),
+                });
+            } catch (e) {}
+            if (this._abortController) {
+                this._abortController.abort();
             }
         },
 
@@ -240,9 +269,16 @@ createApp({
                             if (data.type === 'token') {
                                 assistantMsg.content += data.content;
                                 this.$nextTick(() => this.scrollToBottom());
+                            } else if (data.type === 'clean') {
+                                assistantMsg.content = data.content;
+                                this.$nextTick(() => this.scrollToBottom());
                             } else if (data.type === 'done') {
                                 if (data.download_url) {
                                     assistantMsg.downloadUrl = data.download_url;
+                                }
+                            } else if (data.type === 'cancelled') {
+                                if (!assistantMsg.content) {
+                                    assistantMsg.content = '⏹ 已停止生成';
                                 }
                             } else if (data.type === 'error') {
                                 assistantMsg.content = data.message;
@@ -250,6 +286,56 @@ createApp({
                         } catch (e) { /* 忽略解析错误 */ }
                     }
                 }
+            }
+        },
+
+        /* ========== 图片预览 ========== */
+        previewImage(url) {
+            const overlay = document.createElement('div');
+            overlay.className = 'image-overlay';
+            overlay.innerHTML = `<img src="${url}">`;
+            overlay.onclick = () => overlay.remove();
+            document.body.appendChild(overlay);
+        },
+
+        /* ========== 图片上传 ========== */
+        async handleImageUpload(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            this.loading = true;
+            const conv = this.currentConversation;
+            if (!conv) return;
+
+            conv.messages.push({ role: 'user', content: `📷 上传图片: ${file.name}`, imageUrl: URL.createObjectURL(file) });
+            const assistantMsg = { role: 'assistant', content: '' };
+            conv.messages.push(assistantMsg);
+
+            if (conv.title === '新对话') {
+                conv.title = '📷 ' + file.name.slice(0, 16);
+            }
+
+            this.$nextTick(() => this.scrollToBottom());
+
+            try {
+                const formData = new FormData();
+                formData.append('file', file);
+                const resp = await fetch('/api/upload/image', { method: 'POST', body: formData });
+                const result = await resp.json();
+
+                if (result.status === 'success') {
+                    const desc = result.description || '图片分析未返回有效内容';
+                    assistantMsg.content = `📷 图片分析结果：\n\n${desc}\n\n请输入您的问题，我会基于以上信息帮您分析。`;
+                } else {
+                    assistantMsg.content = '⚠️ 图片分析失败：' + (result.detail || '未知错误');
+                }
+            } catch (e) {
+                assistantMsg.content = '⚠️ 图片上传异常：' + e.message;
+            } finally {
+                this.loading = false;
+                this.saveToStorage();
+                this.$refs.imageInput.value = '';
+                this.$nextTick(() => this.scrollToBottom());
             }
         },
 

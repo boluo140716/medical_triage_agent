@@ -1,21 +1,11 @@
 """
-会话工具函数：UUID 生成、摘要目录管理、答案提取
+会话工具函数：摘要目录管理、答案提取
 """
 import os
-import uuid
 import shutil
 from langchain_core.messages import AIMessage
 from core.settings import TEMP_SUMMARY_DIR
 from core.log_config import logger
-
-
-def _ensure_session_id(session_state: dict) -> str:
-    """确保会话有唯一 ID，用于摘要目录隔离"""
-    sid = session_state.get("session_id")
-    if not sid:
-        sid = uuid.uuid4().hex[:12]
-        session_state["session_id"] = sid
-    return sid
 
 
 def _get_summary_dir(session_id: str) -> str:

@@ -5,6 +5,7 @@ from langgraph.graph import END
 from langchain_core.messages import ToolMessage
 from core.settings import MAX_TOOL_ROUNDS
 from core.log_config import logger
+from agent.nodes import FAKE_SAVE_PATTERNS
 
 
 def tool_route_func(state) -> str:
@@ -20,8 +21,7 @@ def tool_route_func(state) -> str:
     # 无工具调用 → LLM 已给出最终答案
     if not hasattr(last_msg, "tool_calls") or not last_msg.tool_calls:
         content = getattr(last_msg, "content", "") or ""
-        fake_save_patterns = ["复制保存", "复制以下", "请复制", "由于系统限制", "无法直接通过工具", "无法直接保存"]
-        if any(p in content for p in fake_save_patterns):
+        if any(p in content for p in FAKE_SAVE_PATTERNS):
             logger.warning("检测到 LLM 假装保存（未调工具），强制返回 think 重试")
             return "agent_think_node"
         logger.info("LLM 输出最终文本答案，结束")

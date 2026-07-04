@@ -219,6 +219,40 @@ body {
     font-style: italic;
 }
 
+/* 聊天图片 */
+.chat-image {
+    max-width: 240px;
+    max-height: 240px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: block;
+    margin-bottom: 6px;
+    transition: transform 0.2s;
+}
+
+.chat-image:hover {
+    transform: scale(1.02);
+}
+
+/* 图片放大覆盖层 */
+.image-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.85);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
+.image-overlay img {
+    max-width: 90vw;
+    max-height: 90vh;
+    border-radius: 8px;
+    object-fit: contain;
+}
+
 /* 下载链接按钮 */
 .message-content .download-link {
     display: inline-block;
@@ -315,16 +349,17 @@ textarea::placeholder {
 
 .file-upload-btn {
     position: absolute;
-    right: 8px;
+    right: 36px;
     bottom: 8px;
     background: none;
     border: none;
     cursor: pointer;
     font-size: 18px;
     color: var(--text-secondary);
-    padding: 4px;
-    border-radius: 4px;
-    transition: color 0.15s, background 0.15s;
+    padding: 4px 8px;
+    border-radius: 6px;
+    transition: color 0.2s, background 0.2s;
+    line-height: 1;
 }
 
 .file-upload-btn:hover {
@@ -333,6 +368,30 @@ textarea::placeholder {
 }
 
 .file-upload-btn input[type="file"] {
+    display: none;
+}
+
+.image-upload-btn {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 18px;
+    color: var(--text-secondary);
+    padding: 4px 8px;
+    border-radius: 6px;
+    transition: color 0.2s, background 0.2s;
+    line-height: 1;
+}
+
+.image-upload-btn:hover {
+    color: var(--primary);
+    background: #eef2ff;
+}
+
+.image-upload-btn input[type="file"] {
     display: none;
 }
 
@@ -359,6 +418,25 @@ textarea::placeholder {
 .send-btn:disabled {
     background: #d1d5db;
     cursor: not-allowed;
+}
+
+.send-btn.stop-btn {
+    background: #ef4444;
+    animation: stop-pulse 1.2s ease-in-out infinite;
+}
+
+.send-btn.stop-btn:hover {
+    background: #dc2626;
+}
+
+@keyframes stop-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+    50% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+}
+
+.stop-icon {
+    font-size: 14px;
+    line-height: 1;
 }
 
 /* 已上传文件提示 */
