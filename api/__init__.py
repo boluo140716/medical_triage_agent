@@ -8,9 +8,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 app = FastAPI(
-    title="企业知识库 RAG 智能问答系统",
-    description="支持流式 SSE 对话、文档上传、多会话隔离的 RESTful API",
-    version="1.0.0",
+    title="医疗分诊决策 Agent",
+    description="支持流式 SSE 对话、症状评估、科室推荐、药物查询的 RESTful API",
+    version="2.0.0",
 )
 
 # CORS：允许前端跨域调用
@@ -34,13 +34,13 @@ async def serve_index():
     index_path = os.path.join(_STATIC_DIR, "index.html")
     if os.path.isfile(index_path):
         return FileResponse(index_path)
-    return {"message": "前端页面未部署，请使用 API 接口或 Gradio 界面"}
+    return {"message": "前端页面未部署，请使用 API 接口"}
 
 
 @app.get("/api/health")
 async def health_check():
     """健康检查端点"""
-    return {"status": "ok", "service": "enterprise-kb-agent"}
+    return {"status": "ok", "service": "medical-triage-agent"}
 
 # 延迟导入路由，避免循环依赖
 from api.routers import chat, upload

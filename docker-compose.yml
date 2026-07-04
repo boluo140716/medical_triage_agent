@@ -1,11 +1,10 @@
 services:
-  enterprise-kb-agent:
+  medical-triage-agent:
     build:
       context: .
       dockerfile: docker/Dockerfile
-    container_name: enterprise-kb-agent
+    container_name: medical-triage-agent
     ports:
-      - "7862:7862"
       - "7863:7863"
     volumes:
       - ./kb_docs:/app/kb_docs:ro

@@ -48,8 +48,8 @@ def _rewrite_query_for_search(query: str) -> str:
             api_key=DEEPSEEK_API_KEY,
             base_url=DEEPSEEK_BASE_URL,
         )
-        prompt = f"""你是一个企业知识库助手。请根据以下问题，用一段简短的话（30-60字）描述知识库文档中可能包含的相关内容。
-注意：不要编造完整答案，只写和问题相关的核心关键词和短语，模仿公司制度文档的表述风格。
+        prompt = f"""你是一个医学知识库助手。请根据以下问题，用一段简短的话（30-60字）描述医学知识库文档中可能包含的相关内容。
+注意：不要编造完整答案，只写和问题相关的核心关键词和短语，模仿医学百科的表述风格。
 
 问题：{query}
 
@@ -163,7 +163,7 @@ def save_summary_to_txt(summary_text: str) -> str:
 
     session_id = session_store.get_current_session_id()
     if session_id:
-        # 写入文件（Gradio 和 FastAPI 不同进程，文件是唯一共享存储）
+        # 写入文件（FastAPI 会话持久化存储）
         summary_dir = session_store.get_summary_dir() or os.path.join(TEMP_SUMMARY_DIR, session_id)
         os.makedirs(summary_dir, exist_ok=True)
         filepath = os.path.join(summary_dir, "summary.txt")
@@ -179,5 +179,8 @@ def save_summary_to_txt(summary_text: str) -> str:
         return "[保存失败] 无法获取当前会话，请重试。"
 
 
+# 导入医疗分诊工具
+from tools.medical_tools import medical_tool_list
+
 # 对外导出工具列表
-tool_list = [search_knowledge_base, search_online, save_summary_to_txt]
+tool_list = [search_knowledge_base, search_online, save_summary_to_txt] + medical_tool_list

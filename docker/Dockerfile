@@ -2,9 +2,11 @@ FROM docker.1ms.run/library/python:3.13-slim
 
 WORKDIR /app
 
-# 安装 supervisor
+# 安装 supervisor + EasyOCR 系统依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
     supervisor \
+    libgl1 \
+    libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # 复制依赖文件，利用 Docker 层缓存
@@ -22,7 +24,7 @@ RUN mkdir -p /app/kb_docs /app/temp_summary && chmod 777 /app/temp_summary
 # supervisor 配置
 COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-EXPOSE 7862 7863
+EXPOSE 7863
 
 # 仅保留一条启动命令
 CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

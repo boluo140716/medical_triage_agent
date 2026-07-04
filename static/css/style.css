@@ -1,15 +1,15 @@
 :root {
     --sidebar-width: 260px;
-    --primary: #4f46e5;
-    --primary-hover: #4338ca;
-    --bg: #f9fafb;
+    --primary: #0891b2;
+    --primary-hover: #0e7490;
+    --bg: #f0fdfa;
     --surface: #ffffff;
-    --border: #e5e7eb;
+    --border: #ccfbf1;
     --text: #1f2937;
     --text-secondary: #6b7280;
-    --bubble-user: #4f46e5;
-    --bubble-assistant: #f3f4f6;
-    --danger: #ef4444;
+    --bubble-user: #0891b2;
+    --bubble-assistant: #f0fdfa;
+    --danger: #dc2626;
     --radius: 12px;
     --shadow: 0 1px 3px rgba(0,0,0,0.08);
 }
@@ -254,6 +254,16 @@ body {
 
 .empty-state p {
     font-size: 14px;
+}
+
+.empty-state .disclaimer {
+    margin-top: 16px;
+    padding: 8px 16px;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 8px;
+    color: #dc2626;
+    font-size: 13px;
 }
 
 /* ========== 底部输入区 ========== */

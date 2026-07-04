@@ -73,7 +73,7 @@ async def download_file(session_id: str):
     """
     下载保存的总结文件。
     浏览器收到 Content-Disposition: attachment 后会弹出"另存为"对话框。
-    从文件读取（Gradio 和 FastAPI 不同进程，文件是唯一共享存储）。
+    从文件读取会话持久化存储的总结内容。
     """
     filepath = os.path.join(TEMP_SUMMARY_DIR, session_id, "summary.txt")
     if not os.path.isfile(filepath):

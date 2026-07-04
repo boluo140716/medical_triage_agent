@@ -23,8 +23,8 @@ def _extract_answer(result):
 
 
 async def main():
-    logger.info("企业内部知识库智能问答Agent 启动成功")
-    print("功能：内部文档查询、行业资讯联网检索、文档总结导出")
+    logger.info("医疗分诊决策Agent 启动成功")
+    print("功能：症状评估、科室推荐、药物查询、就医指引")
     print("输入 exit / quit / 再见 退出程序\n")
 
     while True:

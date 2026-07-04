@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>企业知识库智能问答系统</title>
+    <title>🏥 医疗分诊决策助手</title>
     <link rel="stylesheet" href="/static/css/style.css">
     <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
 </head>
@@ -15,7 +15,7 @@
     <!-- 左侧边栏 -->
     <aside class="sidebar" :class="{ open: sidebarOpen }">
         <div class="sidebar-header">
-            <h1>📚 知识库问答</h1>
+            <h1>🏥 医疗分诊</h1>
             <button class="new-chat-btn" @click="newConversation">
                 <span>＋</span> 新建对话
             </button>
@@ -68,9 +68,10 @@
 
         <!-- 空状态 -->
         <div class="empty-state" v-else>
-            <div class="icon">📚</div>
-            <h3>企业内部知识库智能问答</h3>
-            <p>内部文档检索 · 行业资讯联网 · 文档总结导出</p>
+            <div class="icon">🏥</div>
+            <h3>医疗分诊决策助手</h3>
+            <p>症状评估 · 科室推荐 · 药物查询 · 就医指引</p>
+            <p class="disclaimer">⚠️ 本系统仅供参考，不能替代专业医生诊断</p>
         </div>
 
         <!-- 底部输入区 -->
