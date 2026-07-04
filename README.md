@@ -1,23 +1,26 @@
 # 🏢 企业知识库 RAG 智能问答 Agent
 
-企业内部知识库智能问答系统，支持 PDF/DOCX/TXT/MD/XLSX 文档检索、联网搜索、文档摘要导出。基于 LangGraph ReAct 循环，提供 Gradio Web、FastAPI REST、控制台三种交互入口。
+企业内部知识库智能问答系统，支持 PDF/DOCX/TXT/MD/XLSX 文档检索、联网搜索、文档摘要导出。基于 LangGraph ReAct 循环，提供豆包风格 Web UI 和 FastAPI REST 两种交互入口。
 
 ## ✨ 功能特性
 
-- **双层检索 + Rerank 精排** — FAISS 粗筛 → 精细分片 → 集合检索（Chroma 向量 + BM25 关键词）→ DashScope 重排序
+- **HyDE 查询改写** — 将用户口语问题自动改写为与文档风格一致的检索文本，大幅提升召回率
+- **双路检索合并** — HyDE 改写 + 原始查询并行检索，去重合并，确保不遗漏
+- **双路检索 + Rerank 精排** — FAISS 粗筛 → 精细分片 → 集合检索（Chroma 向量 + BM25 关键词）→ DashScope 重排序
+- **PDF 内嵌图片 OCR** — EasyOCR 识别 PDF 内嵌图片中的文字（截图、图表），文字提取 + OCR 并行，纯扫描件整页 OCR 兜底
+- **自动增量索引** — 检测 kb_docs 文件变更，新增/删除文档后自动重建 FAISS 索引
 - **临时文档即时索引** — 用户上传文件自动分片、嵌入，会话隔离，关闭即销毁
 - **联网搜索双引擎** — Tavily 优先，DuckDuckGo 自动回退，确保网络检索可用
 - **对话摘要导出** — 保存/导出/另存为关键词门禁，导出为文本文件并嵌入回答卡片
 - **多轮对话上下文记忆** — MemorySaver 检查点 + thread_id 会话隔离，支持指代消解
 - **多标签页隔离** — ContextVar 管理 Chroma 实例、摘要目录、保存门禁，互不干扰
-- **Docker 一键部署** — 单容器双进程（Gradio 7862 + FastAPI 7863），`docker compose up -d`
 
 ## 🧱 架构概览
 
 ```
 ┌───────────────────────────────────────────────────────────┐
 │  入口层                                                    │
-│  Gradio Web UI (:7862)  │  FastAPI REST (:7863)  │  控制台  │
+│  豆包风格 Web UI (:7863)            │  FastAPI REST (:7863) │
 ├───────────────────────────────────────────────────────────┤
 │  Agent 层 (LangGraph ReAct)                               │
 │  agent_think_node ⇄ tool_execute_node                     │
@@ -27,12 +30,17 @@
 │  search_knowledge_base │ search_online │ save_summary_to_txt│
 ├───────────────────────────────────────────────────────────┤
 │  检索链路                                                  │
-│  FAISS 粗筛 → 精细分片(500字) → Chroma+BM25 → Rerank 精排  │
+│  HyDE 改写 → FAISS 粗筛 → 精细分片(500字) → Chroma+BM25   │
+│  → Rerank 精排 → 双路合并（改写+原始）                      │
+├───────────────────────────────────────────────────────────┤
+│  文档处理                                                  │
+│  多格式加载 → 文字提取 + EasyOCR 图片识别 → 智能分片        │
 ├───────────────────────────────────────────────────────────┤
 │  模型服务                                                  │
 │  LLM: DeepSeek-chat (api.deepseek.com)                    │
 │  Embedding: 阿里百炼 text-embedding-v3                     │
 │  Rerank: DashScope gte-rerank                             │
+│  OCR: EasyOCR 中英双语                                     │
 │  联网: Tavily / DuckDuckGo                                │
 └───────────────────────────────────────────────────────────┘
 ```
@@ -42,49 +50,44 @@
 ```
 enterprise_kb_agent/
 ├── main.py                  # 控制台入口（asyncio REPL 流式输出）
-├── web_start.py             # Gradio Web 启动器 (:7862)
-├── run_api.py               # FastAPI 启动器 (:7863)
-├── docker-compose.yml       # Docker 编排（双进程容器）
+├── run_api.py               # FastAPI 启动器 + Web UI 托管 (:7863)
+│
+├── static/                  # 纯 HTML 豆包风格前端
+│   ├── index.html           # Vue3 CDN 单页面（左侧历史会话 + 右侧对话区）
+│   └── css/
+│       └── style.css        # 样式
 │
 ├── core/                    # 核心配置与工具
 │   ├── settings.py          # 全局配置（模型、检索、分片参数）
 │   ├── prompts.py           # 系统提示词 + 保存关键词白名单
 │   ├── log_config.py        # 日志配置（轮转：10MB × 5）
 │   ├── session_store.py     # ContextVar 会话存储
+│   ├── session_utils.py     # 会话工具（UUID、摘要目录、答案提取）
 │   └── utils.py             # 通用工具函数
 │
 ├── agent/                   # LangGraph Agent
 │   ├── state.py             # AgentState（消息列表累加）
 │   ├── graph_builder.py     # 图构建（MemorySaver 检查点）
 │   ├── nodes.py             # ReAct 思考/执行节点
-│   ├── retriever.py         # 双层检索聚合 + LRU 缓存 + 上下文扩展
+│   ├── retriever.py         # 双层检索聚合 + HyDE 改写 + LRU 缓存
 │   └── routes.py            # 条件路由（工具调用 → 执行 → 结束）
 │
 ├── tools/                   # LangChain 工具
-│   └── agent_tools.py       # search_knowledge_base / search_online / save_summary_to_txt
+│   └── agent_tools.py       # HyDE 查询改写 + search_knowledge_base / search_online / save_summary_to_txt
 │
 ├── document/                # 文档处理管道
-│   ├── loader.py            # 多格式加载（txt/pdf/docx/md/xlsx）+ 编码回退
+│   ├── loader.py            # 多格式加载（txt/pdf/docx/md/xlsx）+ PDF 内嵌图片 EasyOCR
 │   ├── splitter.py          # 文本分片（摘要 80 字 / 正文 500 字）
-│   ├── vector_store.py      # FAISS 索引构建/检索 + DashScope 嵌入
+│   ├── vector_store.py      # FAISS 索引构建/自动增量重建 + DashScope 嵌入
 │   └── reranker.py          # gte-rerank 重排序（指数退避重试）
 │
 ├── api/                     # FastAPI REST
+│   ├── __init__.py          # 应用入口 + StaticFiles 托管前端
 │   ├── models.py            # Pydantic 请求/响应模型
 │   ├── dependency.py        # 会话注入与清理
 │   └── routers/
 │       ├── chat.py          # SSE 流式对话 + 非流式回退 + 文件下载
 │       └── upload.py        # 文件上传 + 会话清理
-│
-├── web/                     # Gradio Web UI
-│   ├── layout.py            # UI 布局 + 事件绑定（Gradio Blocks）
-│   ├── chat.py              # 流式对话生成器（含摘要卡片）
-│   ├── upload.py            # 文件上传处理
-│   └── session_utils.py     # 会话工具（UUID、摘要目录、答案提取）
-│
-├── docker/
-│   ├── Dockerfile           # python:3.13-slim 多阶段镜像
-│   └── supervisord.conf     # Supervisor 双进程管理
 │
 ├── kb_docs/                 # 持久化知识库文档目录
 ├── temp_summary/            # 摘要临时存储（按 session_id 隔离）
@@ -124,20 +127,15 @@ TAVILY_API_KEY=tvly-your-tavily-key
 pip install -r requirements.txt
 ```
 
-### 启动方式（4 选 1）
+### 启动方式
 
 ```bash
-# 方式 1：Gradio Web 界面 → 浏览器访问 http://localhost:7862
-python web_start.py
-
-# 方式 2：FastAPI REST API → Swagger 文档 http://localhost:7863/docs
+# 唯一启动入口：FastAPI + Web UI → 浏览器访问 http://localhost:7863
 python run_api.py
 
-# 方式 3：控制台交互（asyncio REPL 流式输出）
+# 控制台交互（asyncio REPL 流式输出）
 python main.py
-
-#方式 4：docker命令启动（docker-compose up -d --build）
-拉取成功后，浏览器访问页面本地地址即可
+```
 
 ## 📡 REST API 接口
 
@@ -199,7 +197,13 @@ docker compose up -d
 用户提问
   │
   ▼
-FAISS 摘要级向量检索（Top-3 文档粗筛）
+HyDE 改写：LLM 生成与文档风格一致的检索文本
+  │
+  ├─→ 改写文本 FAISS 摘要级向量检索
+  └─→ 原始提问 FAISS 摘要级向量检索
+  │
+  ▼
+双路结果去重合并（Top-3 文档粗筛）
   │
   ▼
 命中文档 → 精细分片（500 字，100 字重叠）
@@ -227,11 +231,12 @@ DashScope gte-rerank 重排序（Top-3）
 | 重排序 | DashScope gte-rerank |
 | 向量索引 | FAISS（粗筛）+ Chroma（精细临时索引） |
 | 关键词检索 | BM25（rank-bm25） |
+| 查询改写 | HyDE（Hypothetical Document Embeddings） |
+| OCR | EasyOCR 中英双语（PDF 内嵌图片识别） |
 | 联网搜索 | Tavily + DuckDuckGo 双引擎回退 |
-| Web UI | Gradio 6.x（异步流式） |
-| REST API | FastAPI + Uvicorn（SSE 流式） |
-| 依赖管理 | pip + Docker |
-| 容器化 | Docker Compose + Supervisor 双进程 |
+| Web UI | 纯 HTML + Vue3 CDN + CSS（豆包风格） |
+| REST API | FastAPI + Uvicorn（SSE 流式 + StaticFiles） |
+| 依赖管理 | pip |
 
 ## 📄 License
 
