@@ -6,7 +6,7 @@ import os
 import traceback
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse, Response
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, AIMessageChunk
 
 from api.models import ChatRequest, ChatResponse
 from api.dependency import inject_session, cleanup_session
@@ -50,6 +50,33 @@ def _strip_xml_content(text: str) -> str:
     return cleaned
 
 
+async def _cleanup_incomplete_state(session_id: str):
+    """清理因暂停留下的不完整工具调用状态，避免下次请求 DeepSeek 400 错误"""
+    try:
+        config = {"configurable": {"thread_id": session_id}}
+        state = await agent_app.aget_state(config)
+        if not state or not state.values:
+            return
+        messages = list(state.values.get("messages", []))
+        if not messages:
+            return
+        last_msg = messages[-1]
+        if not isinstance(last_msg, AIMessage) or not getattr(last_msg, "tool_calls", None):
+            return
+        # 最后一条是带 tool_calls 的 AIMessage，说明上次暂停时工具未执行完
+        messages.pop()
+        for tc in last_msg.tool_calls:
+            messages.append(ToolMessage(
+                content="[操作已取消]",
+                tool_call_id=tc.get("id", ""),
+                name=tc.get("name", "unknown")
+            ))
+        await agent_app.aupdate_state(config, {"messages": messages})
+        logger.info(f"会话 {session_id[:8]}... 已清理不完整工具调用状态")
+    except Exception as e:
+        logger.warning(f"清理状态失败: {e}")
+
+
 async def _stream_chat_events(user_input: str, session_id: str):
     """
     SSE 事件生成器，逐 token 流式推送。
@@ -62,39 +89,34 @@ async def _stream_chat_events(user_input: str, session_id: str):
       data: {"type": "clean", "content": "..."}  (XML 工具调用被过滤后的清理内容)
     """
     try:
+        # 清理上次暂停留下的不完整工具调用状态
+        await _cleanup_incomplete_state(session_id)
+
         graph_config = {"configurable": {"thread_id": session_id}}
         cancel_event = session_store.get_cancel_event(session_id)
         accumulated = ""  # 累积本轮 LLM 输出，用于检测 XML 工具调用
         xml_detected = False
-        async for event in agent_app.astream_events(
+        async for msg, _metadata in agent_app.astream(
             {"messages": [HumanMessage(content=user_input)]},
             config=graph_config,
-            version="v2"
+            stream_mode="messages"
         ):
-            # 检查取消标记
             if cancel_event.is_set():
                 logger.info(f"会话 {session_id[:8]}... 收到取消请求，中断流式输出")
                 yield f"data: {json.dumps({'type': 'cancelled', 'message': '已停止生成'}, ensure_ascii=False)}\n\n"
                 return
-            try:
-                kind = event.get("event")
-                if kind == "on_chat_model_stream":
-                    chunk_data = event.get("data", {}).get("chunk")
-                    if chunk_data and hasattr(chunk_data, "content"):
-                        content = chunk_data.content
-                        if content:
-                            accumulated += content
-                            # 检测 XML 工具调用开始标记
-                            if not xml_detected and _has_xml_tool_start(accumulated):
-                                xml_detected = True
-                                # 只保留 XML 之前的内容，发送清理事件
-                                clean = _strip_xml_content(accumulated)
-                                if clean:
-                                    yield f"data: {json.dumps({'type': 'clean', 'content': clean}, ensure_ascii=False)}\n\n"
-                            if not xml_detected:
-                                yield f"data: {json.dumps({'type': 'token', 'content': content}, ensure_ascii=False)}\n\n"
-            except Exception:
-                continue
+
+            if isinstance(msg, AIMessageChunk) and msg.content:
+                content = msg.content
+                if isinstance(content, str):
+                    accumulated += content
+                    if not xml_detected and _has_xml_tool_start(accumulated):
+                        xml_detected = True
+                        clean = _strip_xml_content(accumulated)
+                        if clean:
+                            yield f"data: {json.dumps({'type': 'clean', 'content': clean}, ensure_ascii=False)}\n\n"
+                    if not xml_detected:
+                        yield f"data: {json.dumps({'type': 'token', 'content': content}, ensure_ascii=False)}\n\n"
 
         # 检测是否有保存内容
         download_url = None

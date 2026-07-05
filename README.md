@@ -7,13 +7,17 @@
 - **多轮追问式分诊** — 不直接给结论，先追问关键信息（持续时间、疼痛程度、伴随症状）再综合判断
 - **三层紧急分级** — 🔴紧急(立即急诊) / 🟡建议尽快就诊 / 🟢可居家观察
 - **危险信号自动排查** — 逐条排查脑卒中FAST、心梗、脑膜炎、过敏性休克等致命信号
+- **图片上传 + 视觉分析** — 支持上传图片，Qwen-VL 视觉描述 + CnOCR 文字提取，图片和文字可在同一对话中发送
+- **OTC 药物智能推荐** — 🟢 非紧急情况自动检索 OTC 非处方药建议（适应症 + 禁忌 + 注意事项）
+- **生活调理建议** — 识别熬夜乏力、久坐腰酸等非病理性问题，给出生活方式建议而非科室推荐
 - **HyDE 查询改写** — 将用户口语症状描述自动改写为医学风格检索文本，提升召回率
 - **双路检索 + Rerank 精排** — FAISS 粗筛 → 精细分片 → Chroma+BM25 → DashScope 重排序
 - **药物安全查询** — 检索药品适应症、禁忌、注意事项、相互作用
-- **PDF 内嵌图片 OCR** — EasyOCR 识别 PDF 内嵌图片中的文字
+- **PDF 内嵌图片 OCR** — CnOCR 识别 PDF 内嵌图片中的文字
 - **自动增量索引** — 检测 kb_docs 文件变更，自动重建 FAISS 索引
 - **联网搜索** — Tavily + DuckDuckGo 双引擎，搜索医院科室、药物信息
 - **多轮对话上下文记忆** — MemorySaver 检查点 + thread_id 会话隔离
+- **流式打字机效果** — SSE 逐 token 推送，支持中途暂停/继续
 
 ## 🧱 架构概览
 
@@ -29,18 +33,19 @@
 │  工具层                                                    │
 │  search_knowledge_base │ search_online │ save_summary     │
 │  assess_symptom_urgency │ check_drug_safety               │
+│  check_drug_interaction │ image_analyzer (Qwen-VL+CnOCR)  │
 ├───────────────────────────────────────────────────────────┤
 │  检索链路                                                  │
 │  HyDE 改写 → FAISS 粗筛 → 精细分片(500字) → Chroma+BM25   │
 │  → Rerank 精排 → 双路合并（改写+原始）                      │
 ├───────────────────────────────────────────────────────────┤
 │  文档处理                                                  │
-│  多格式加载 → 文字提取 + EasyOCR 图片识别 → 智能分片        │
+│  多格式加载 → 文字提取 + CnOCR 图片识别 → 智能分片           │
 ├───────────────────────────────────────────────────────────┤
 │  模型服务                                                  │
 │  LLM: DeepSeek-chat │ Embedding: 阿里百炼                  │
-│  Rerank: DashScope gte-rerank │ OCR: EasyOCR 中英双语      │
-│  联网: Tavily / DuckDuckGo                                │
+│  Rerank: DashScope gte-rerank │ OCR: CnOCR 中英双语        │
+│  Vision: Qwen-VL-Max │ 联网: Tavily / DuckDuckGo          │
 └───────────────────────────────────────────────────────────┘
 ```
 
@@ -73,7 +78,8 @@ enterprise_kb_agent/
 │
 ├── tools/                   # LangChain 工具
 │   ├── agent_tools.py       # 通用工具 + 工具列表注册
-│   └── medical_tools.py     # 医疗分诊专用工具
+│   ├── medical_tools.py     # 医疗分诊专用工具
+│   └── image_analyzer.py    # 图片分析（Qwen-VL 视觉 + CnOCR 文字）
 │
 ├── document/                # 文档处理管道
 │   ├── loader.py            # 多格式加载 + PDF OCR
@@ -151,8 +157,10 @@ Base URL: `http://localhost:7863`
 | `GET` | `/api/health` | 健康检查 → `{"status":"ok"}` |
 | `POST` | `/api/chat/stream` | SSE 流式对话 → `data: {"type":"token","content":"..."}` |
 | `POST` | `/api/chat` | 非流式对话 → `{"answer":"...","session_id":"..."}` |
+| `POST` | `/api/chat/stop` | 停止当前流式生成 |
 | `GET` | `/api/download/{session_id}` | 下载会话摘要文件 |
 | `POST` | `/api/upload` | 上传临时文档（multipart） |
+| `POST` | `/api/upload/image` | 上传图片分析（Qwen-VL + CnOCR） |
 | `DELETE` | `/api/upload` | 清空会话上传文件 |
 
 ### 请求示例
@@ -161,12 +169,12 @@ Base URL: `http://localhost:7863`
 # 流式对话
 curl -X POST http://localhost:7863/api/chat/stream \
   -H "Content-Type: application/json" \
-  -d '{"question":"主动离职需提前多少天提交申请？","session_id":null}'
+  -d '{"question":"头痛持续3天，需要看哪个科室？","session_id":null}'
 
 # 非流式对话
 curl -X POST http://localhost:7863/api/chat \
   -H "Content-Type: application/json" \
-  -d '{"question":"年假怎么算？","session_id":null}'
+  -d '{"question":"布洛芬有什么禁忌？","session_id":null}'
 ```
 
 ## 🐳 Docker 部署
@@ -175,10 +183,8 @@ curl -X POST http://localhost:7863/api/chat \
 docker compose up -d
 ```
 
-- Gradio Web UI → `http://localhost:7862`
-- FastAPI REST → `http://localhost:7863`
+- FastAPI REST + Web UI → `http://localhost:7863`
 - `kb_docs/` 挂载为只读，`temp_summary/` 持久化
-- Supervisor 管理 Gradio + FastAPI 双进程，异常自动重启
 
 ## 🔧 核心配置
 
@@ -235,7 +241,8 @@ DashScope gte-rerank 重排序（Top-3）
 | 向量嵌入 | 阿里百炼 DashScope text-embedding-v3 |
 | 重排序 | DashScope gte-rerank |
 | 查询改写 | HyDE（Hypothetical Document Embeddings）|
-| OCR | EasyOCR 中英双语 |
+| OCR | CnOCR 中英双语 |
+| 视觉分析 | Qwen-VL-Max |
 | 联网搜索 | Tavily + DuckDuckGo 双引擎回退 |
 | Web UI | 纯 HTML + Vue3 CDN + CSS（豆包风格）|
 | REST API | FastAPI + Uvicorn（SSE 流式 + StaticFiles）|

@@ -105,7 +105,7 @@ def _truncate_messages(messages: list, max_chars: int = MAX_CONTEXT_CHARS) -> li
     return result
 
 
-def agent_think_node(state):
+async def agent_think_node(state):
     """
     ReAct 思考节点：LLM 决定调用工具或直接输出最终答案。
 
@@ -174,14 +174,14 @@ def agent_think_node(state):
 
     if force_answer:
         logger.info(f"强制纯文本回答模式 (工具轮数 {tool_count}/{MAX_TOOL_ROUNDS})")
-        ai_msg = llm.invoke(messages)
+        ai_msg = await llm.ainvoke(messages)
     else:
         llm_with_tools = llm.bind_tools(available_tools)
-        ai_msg = llm_with_tools.invoke(messages)
+        ai_msg = await llm_with_tools.ainvoke(messages)
 
         if docs_cache and not ai_msg.content and not (hasattr(ai_msg, 'tool_calls') and ai_msg.tool_calls):
             logger.info("工具绑定模式下 KB 问答输出为空，回退到纯文本模式")
-            ai_msg = llm.invoke(messages)
+            ai_msg = await llm.ainvoke(messages)
 
     # 清理 XML 工具调用文本
     if ai_msg.content:
@@ -191,7 +191,7 @@ def agent_think_node(state):
             ai_msg = AIMessage(content=cleaned)
         elif cleaned is not None:
             logger.info("伪 tool_call XML 文本无有效内容，重试纯文本回答")
-            ai_msg = llm.invoke(messages)
+            ai_msg = await llm.ainvoke(messages)
 
     # 假保存检测
     if not force_answer:

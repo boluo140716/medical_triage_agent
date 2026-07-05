@@ -1,10 +1,9 @@
 """
-图片分析模块：EasyOCR 文字提取 + Qwen-VL 视觉描述
+图片分析模块：CnOCR 文字提取 + Qwen-VL 视觉描述
 """
 import io
 import os
 import base64
-import time
 import threading
 from PIL import Image
 from core.log_config import logger
@@ -17,60 +16,51 @@ except ImportError:
     _qwen_available = False
     logger.warning("dashscope 未安装，Qwen-VL 视觉描述不可用")
 
-_ocr_reader = None
+_ocr = None
 _ocr_lock = threading.Lock()
-_ocr_failed = False  # 标记 OCR 是否初始化失败，避免反复重试
+_ocr_failed = False
 
 
 def _get_ocr():
-    global _ocr_reader, _ocr_failed
-    if _ocr_reader is None and not _ocr_failed:
+    """懒加载 CnOCR（预加载线程负责初始化，请求路径直接返回）"""
+    global _ocr, _ocr_failed
+    if _ocr is None and not _ocr_failed:
         with _ocr_lock:
-            if _ocr_reader is None and not _ocr_failed:
-                for attempt in range(3):
-                    try:
-                        import easyocr
-                        _ocr_reader = easyocr.Reader(["ch_sim", "en"], gpu=False)
-                        logger.info("EasyOCR 模型加载完成")
-                        return _ocr_reader
-                    except PermissionError:
-                        logger.warning(f"EasyOCR 下载被文件锁阻止（第{attempt+1}次），5秒后重试...")
-                        time.sleep(5)
-                    except Exception as e:
-                        logger.warning(f"EasyOCR 初始化失败（第{attempt+1}次）: {e}")
-                        if attempt < 2:
-                            time.sleep(3)
-                # 3次都失败，标记为不可用
-                _ocr_failed = True
-                logger.warning("EasyOCR 初始化失败（已重试3次），图片文字提取功能不可用，视觉描述仍正常")
-    return _ocr_reader
+            if _ocr is None and not _ocr_failed:
+                try:
+                    from cnocr import CnOcr
+                    _ocr = CnOcr()
+                    logger.info("CnOCR 模型加载完成")
+                except Exception as e:
+                    _ocr_failed = True
+                    logger.warning(f"CnOCR 初始化失败: {e}，图片文字提取功能不可用，视觉描述仍正常")
+    return _ocr
 
 
 def preload_ocr():
-    """启动时预加载 OCR 模型，避免首次请求卡顿"""
-    logger.info("预加载 EasyOCR 模型...")
+    """启动时预加载 OCR 模型"""
+    logger.info("预加载 CnOCR 模型...")
     _get_ocr()
 
 def _extract_text(image_bytes: bytes) -> str:
-    """用 EasyOCR 提取图片中的文字"""
+    """用 CnOCR 提取图片中的文字"""
     try:
-        reader = _get_ocr()
+        ocr = _get_ocr()
+        if ocr is None:
+            return ""
         image = Image.open(io.BytesIO(image_bytes))
-        # 大图缩放：长边 > 1024px 时等比缩小，防止内存爆炸
+        # 大图缩放：长边 > 1024px 时等比缩小
         max_size = 1024
         w, h = image.size
         if max(w, h) > max_size:
             ratio = max_size / max(w, h)
             image = image.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
             logger.info(f"图片缩放: {w}x{h} → {image.size[0]}x{image.size[1]}")
-        arr = list(image.convert("RGB").getdata())
-        h, w = image.size[1], image.size[0]
-        arr = [arr[i * w:(i + 1) * w] for i in range(h)]
-        results = reader.readtext(arr)
-        texts = [r[1] for r in results if r[2] > 0.3]
+        results = ocr.ocr(image)
+        texts = [r["text"] for r in results if r.get("score", 0) > 0.3]
         return "\n".join(texts) if texts else ""
     except Exception as e:
-        logger.warning(f"EasyOCR 文字提取失败: {e}")
+        logger.warning(f"CnOCR 文字提取失败: {e}")
         return ""
     
 def _visual_description(image_bytes: bytes) -> str:

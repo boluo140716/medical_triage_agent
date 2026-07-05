@@ -48,7 +48,12 @@ from api.routers import chat, upload
 app.include_router(chat.router)
 app.include_router(upload.router)
 
-# 启动时预加载 EasyOCR 模型（后台线程，不阻塞启动）
-import threading
-from tools.image_analyzer import preload_ocr
-threading.Thread(target=preload_ocr, daemon=True).start()
+# 启动时预加载 CnOCR 模型（后台线程，不阻塞启动）
+# 设置 EASYOCR_SKIP_PRELOAD=1 可跳过预加载（如开发时频繁 reload）
+import threading as _threading
+if not os.getenv("EASYOCR_SKIP_PRELOAD"):
+    from tools.image_analyzer import preload_ocr
+    _threading.Thread(target=preload_ocr, daemon=True).start()
+else:
+    from core.log_config import logger
+    logger.info("EASYOCR_SKIP_PRELOAD=1，跳过预加载，首次图片上传时按需加载")

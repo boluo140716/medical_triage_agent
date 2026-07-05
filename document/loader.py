@@ -1,9 +1,8 @@
 """
 文档加载模块：支持 txt / pdf / docx / markdown / excel 多格式文档读取
-PDF：文字提取 + 内嵌图片 EasyOCR 并行，合并结果；纯扫描件自动整页 OCR 兜底
+PDF：文字提取 + 内嵌图片 CnOCR 并行，合并结果；纯扫描件自动整页 OCR 兜底
 """
 import os
-import numpy as np
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader, UnstructuredMarkdownLoader, UnstructuredExcelLoader
 from langchain_core.documents import Document
 from core.log_config import logger
@@ -14,25 +13,28 @@ _ocr_engine = None
 
 
 def _get_ocr():
-    """懒加载 EasyOCR 单例，避免重复初始化（首次加载需下载模型约 100MB）"""
+    """懒加载 CnOCR 单例"""
     global _ocr_engine
     if _ocr_engine is None:
         try:
-            import easyocr
-            _ocr_engine = easyocr.Reader(['ch_sim', 'en'], gpu=False)
-            logger.info("EasyOCR 初始化完成（中英文）")
+            from cnocr import CnOcr
+            _ocr_engine = CnOcr()
+            logger.info("CnOCR 初始化完成（中英文）")
         except ImportError:
-            logger.error("EasyOCR 未安装，请执行: pip install easyocr")
+            logger.error("CnOCR 未安装，请执行: pip install cnocr")
             raise
     return _ocr_engine
 
 
-def _ocr_image(img_array: np.ndarray) -> str:
-    """对单张图片执行 OCR，返回识别文本"""
+def _ocr_image(image) -> str:
+    """对单张图片执行 OCR，返回识别文本（接受 PIL Image 或 numpy array）"""
     try:
-        reader = _get_ocr()
-        result = reader.readtext(img_array, detail=0)
-        return "\n".join(result) if result else ""
+        from PIL import Image
+        if not isinstance(image, Image.Image):
+            image = Image.fromarray(image)
+        ocr = _get_ocr()
+        results = ocr.ocr(image)
+        return "\n".join(r["text"] for r in results if r.get("score", 0) > 0.3)
     except Exception:
         return ""
 
@@ -88,7 +90,7 @@ def _load_pdf_with_ocr(path: str):
 
 
 def _ocr_page_images(page, pdf_doc) -> list:
-    """提取 PDF 页面内嵌图片，EasyOCR 识别"""
+    """提取 PDF 页面内嵌图片，CnOCR 识别"""
     image_texts = []
     try:
         from PIL import Image
@@ -108,8 +110,7 @@ def _ocr_page_images(page, pdf_doc) -> list:
                 if img.width < 50 or img.height < 50:
                     continue
 
-                img_array = np.array(img.convert("RGB"))
-                text = _ocr_image(img_array)
+                text = _ocr_image(img)
                 if text:
                     image_texts.append(text)
             except Exception:
@@ -135,8 +136,7 @@ def _ocr_pdf_pages_full(path: str) -> list:
             mat = fitz.Matrix(2.0, 2.0)
             pix = page.get_pixmap(matrix=mat)
             img = Image.open(io.BytesIO(pix.tobytes("png")))
-            img_array = np.array(img.convert("RGB"))
-            text = _ocr_image(img_array)
+            text = _ocr_image(img)
             if text:
                 ocr_docs.append(Document(
                     page_content=text,

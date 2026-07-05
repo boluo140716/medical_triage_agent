@@ -85,6 +85,12 @@
                 </span>
             </div>
 
+            <!-- 待发送图片预览 -->
+            <div class="pending-image" v-if="pendingImageUrl">
+                <img :src="pendingImageUrl" class="pending-image-preview">
+                <span class="remove-pending-image" @click="removePendingImage">✕</span>
+            </div>
+
             <div class="input-row">
                 <div class="input-wrapper">
                     <textarea
@@ -109,7 +115,7 @@
                 </div>
                 <button class="send-btn" @click="loading ? stopGeneration() : sendMessage()" 
                         :class="{'stop-btn': loading}"
-                        :disabled="!loading && !inputText.trim()"
+                        :disabled="!loading && !inputText.trim() && !pendingImage"
                         :title="loading ? '停止生成' : '发送'">
                     <span v-if="!loading">↑</span>
                     <span v-else class="stop-icon">■</span>
@@ -132,6 +138,8 @@ createApp({
             loading: false,
             uploadedFiles: [],
             uploadedChroma: null,
+            pendingImage: null,
+            pendingImageUrl: null,
         };
     },
 
@@ -166,12 +174,14 @@ createApp({
             });
             this.currentId = id;
             this.sidebarOpen = false;
+            this.removePendingImage();
             this.saveToStorage();
         },
 
         switchConversation(id) {
             this.currentId = id;
             this.sidebarOpen = false;
+            this.removePendingImage();
             this.$nextTick(() => this.scrollToBottom());
         },
 
@@ -187,28 +197,57 @@ createApp({
         /* ========== 发送消息 ========== */
         async sendMessage() {
             const text = this.inputText.trim();
-            if (!text || this.loading) return;
+            const hasImage = !!this.pendingImage;
+            if ((!text && !hasImage) || this.loading) return;
 
             const conv = this.currentConversation;
             if (!conv) return;
 
+            const imageFile = this.pendingImage;
+            const imageUrl = this.pendingImageUrl;
             this.inputText = '';
+            this.pendingImage = null;
+            this.pendingImageUrl = null;
             this.loading = true;
             this._abortController = new AbortController();
 
-            conv.messages.push({ role: 'user', content: text });
+            // 有图片时先上传分析
+            let imageAnalysis = '';
+            if (imageFile) {
+                try {
+                    const formData = new FormData();
+                    formData.append('file', imageFile);
+                    const resp = await fetch('/api/upload/image', { method: 'POST', body: formData });
+                    const result = await resp.json();
+                    if (result.status === 'success') {
+                        imageAnalysis = result.description || '';
+                    }
+                } catch (e) {
+                    imageAnalysis = '';
+                }
+            }
+
+            // 组装用户消息：界面只显示图片+文字，Agent 拿到完整分析
+            const displayContent = text || '📷 图片';
+            const agentPrompt = imageAnalysis
+                ? `📷 [图片分析结果]
+${imageAnalysis}
+
+用户的问题：${text || '请帮我分析这张图片'}`
+                : text;
+
+            conv.messages.push({ role: 'user', content: displayContent, imageUrl: imageUrl || undefined });
             const assistantMsg = { role: 'assistant', content: '' };
             conv.messages.push(assistantMsg);
 
-            // 自动更新标题
             if (conv.title === '新对话') {
-                conv.title = text.slice(0, 20) + (text.length > 20 ? '...' : '');
+                conv.title = (text || '📷 图片咨询').slice(0, 20) + ((text || '📷 图片咨询').length > 20 ? '...' : '');
             }
 
             this.$nextTick(() => this.scrollToBottom());
 
             try {
-                await this.streamChat(text, conv.id, assistantMsg);
+                await this.streamChat(agentPrompt, conv.id, assistantMsg);
             } catch (e) {
                 if (e.name === 'AbortError') {
                     assistantMsg.content = assistantMsg.content || '⏹ 已停止生成';
@@ -243,6 +282,7 @@ createApp({
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ question, session_id: sessionId }),
+                signal: this._abortController.signal,
             });
 
             if (!response.ok) {
@@ -302,41 +342,16 @@ createApp({
         async handleImageUpload(e) {
             const file = e.target.files[0];
             if (!file) return;
+            this.pendingImage = file;
+            this.pendingImageUrl = URL.createObjectURL(file);
+            this.$refs.imageInput.value = '';
+            this.$nextTick(() => this.$refs.inputBox?.focus());
+        },
 
-            this.loading = true;
-            const conv = this.currentConversation;
-            if (!conv) return;
-
-            conv.messages.push({ role: 'user', content: `📷 上传图片: ${file.name}`, imageUrl: URL.createObjectURL(file) });
-            const assistantMsg = { role: 'assistant', content: '' };
-            conv.messages.push(assistantMsg);
-
-            if (conv.title === '新对话') {
-                conv.title = '📷 ' + file.name.slice(0, 16);
-            }
-
-            this.$nextTick(() => this.scrollToBottom());
-
-            try {
-                const formData = new FormData();
-                formData.append('file', file);
-                const resp = await fetch('/api/upload/image', { method: 'POST', body: formData });
-                const result = await resp.json();
-
-                if (result.status === 'success') {
-                    const desc = result.description || '图片分析未返回有效内容';
-                    assistantMsg.content = `📷 图片分析结果：\n\n${desc}\n\n请输入您的问题，我会基于以上信息帮您分析。`;
-                } else {
-                    assistantMsg.content = '⚠️ 图片分析失败：' + (result.detail || '未知错误');
-                }
-            } catch (e) {
-                assistantMsg.content = '⚠️ 图片上传异常：' + e.message;
-            } finally {
-                this.loading = false;
-                this.saveToStorage();
-                this.$refs.imageInput.value = '';
-                this.$nextTick(() => this.scrollToBottom());
-            }
+        removePendingImage() {
+            if (this.pendingImageUrl) URL.revokeObjectURL(this.pendingImageUrl);
+            this.pendingImage = null;
+            this.pendingImageUrl = null;
         },
 
         /* ========== 文件上传 ========== */

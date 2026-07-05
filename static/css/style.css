@@ -520,3 +520,35 @@ textarea::placeholder {
 ::-webkit-scrollbar-thumb:hover {
     background: #9ca3af;
 }
+
+/* ========== 待发送图片预览 ========== */
+.pending-image {
+    position: relative;
+    display: inline-block;
+    margin: 0 4px 6px 0;
+}
+
+.pending-image-preview {
+    width: 80px;
+    height: 80px;
+    object-fit: cover;
+    border-radius: 8px;
+    border: 2px solid #3b82f6;
+}
+
+.remove-pending-image {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 20px;
+    height: 20px;
+    background: #ef4444;
+    color: #fff;
+    border-radius: 50%;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    line-height: 1;
+}
